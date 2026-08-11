@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 6 · Emissão de NF-e em massa</title>
+<link rel="stylesheet" href="file.css">
+<script>window.MathJax={tex:{inlineMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 6 · Semanas 6–7 · módulo mais denso</p>
+  <h1>O núcleo fiscal: emissão de NF-e em massa</h1>
+  <p class="lead">Por que a API v3 não gera NF a partir do pedido, como montar o documento fiscal inteiro, recálculo de vencimentos e os quatro estados possíveis de uma emissão.</p>
+
+  <h2 id="licao">6.1 A lição mais importante do projeto</h2>
+<pre><code># ❌ VALIDATION_ERROR: "A nota deve ter ao menos um item",
+#    "Data de operação inválida", "Número do documento não informado"
+await client.post("/nfe", json={"pedidoVenda": {"id": 12345}})</code></pre>
+  <div class="box err"><span class="tag">Fundamental</span>
+    <p>A API v3 do Bling <strong>não</strong> preenche a NF a partir do pedido. Isso funciona na
+    interface web, não na API. O cliente precisa montar o documento fiscal inteiro.</p></div>
+
+  <h3>O fluxo correto — 7 passos por pedido</h3>
+  <div class="diagram">1. GET /pedidos/vendas/{id}   → dados do pedido
+2. Validação local            → falha rápida, sem gastar requisição
+3. GET /contatos/{id}         → CPF/CNPJ, IE, endereço completo
+4. Montar payload             → tipo, dataOperacao, contato, itens, parcelas, transporte
+5. POST /nfe                  → NF "Em digitação" → nf_id
+6. POST /nfe/{id}/enviar      → transmite à SEFAZ → "Autorizada"
+7. GET DANFE + XML → e-mail</div>
+  <p><strong>Criar ≠ emitir.</strong> Após o passo 5 a NF existe, mas não tem validade fiscal.</p>
+
+  <h2 id="responsabilidade">6.2 Separação de responsabilidades</h2>
+  <div class="box"><p><code>nf_service</code> monta o payload — ele conhece a regra de negócio.<br>
+  <code>bling_client</code> só faz HTTP — ele não sabe o que está enviando.</p></div>
+  <p>É por isso que <code>routers/pedidos.py</code> é tão fino:</p>
+<pre><code>relatorio = await nf_service.emitir_nfs_massa(
+    db=db, usuario_id=usuario_id, pedido_ids=pedido_ids,
+    data_base=data_base, email_destino=email_destino,
+)
+# relatorio = {"sucesso": [...], "erros": [...], "total": N, "email_enviado": bool}</code></pre>
+
+  <h2 id="validacao">6.3 Validação prévia (falha rápida)</h2>
+<pre><code>def _validar_pedido_basico(pedido: dict) -&gt; str | None:
+    contato = pedido.get("contato") or {}
+    digitos = "".join(c for c in (contato.get("numeroDocumento") or "") if c.isdigit())
+
+    if not digitos:
+        return f"Cliente '{contato.get('nome','?')}' sem CPF/CNPJ cadastrado."
+    if len(digitos) not in (11, 14):
+        return (f"Cliente '{contato.get('nome','?')}': CPF/CNPJ inválido "
+                f"({len(digitos)} dígitos — esperado 11 ou 14).")
+
+    itens = pedido.get("itens") or []
+    if not itens:
+        return "Pedido sem itens — não é possível emitir NF."
+
+    for item in itens:
+        if float(item.get("valor") or 0) &lt;= 0:
+            desc = item.get("descricao") or item.get("codigo") or "?"
+            return f"Item '{desc}' com valor zero — corrija o pedido no Bling."
+    return None</code></pre>
+  <p><strong>Contrato:</strong> <code>None</code> = válido, <code>str</code> = motivo do erro —
+  consistente com <code>get_valid_access_token</code>.</p>
+  <p>Cada validação local economiza 2 requisições ao Bling (respeitando o rate limit) e produz
+  mensagem acionável em vez de um <code>VALIDATION_ERROR</code> genérico.
+  <code>"".join(c for c in cpf if c.isdigit())</code> normaliza <code>123.456.789-01</code> → <code>12345678901</code>.</p>
+  <div class="box tip"><span class="tag">Evolução</span>
+    <p>Validar também os dígitos verificadores: o Bling rejeita <code>11111111111</code>
+    (11 dígitos, mas inválido).</p></div>
+
+  <h2 id="get-or">6.4 O padrão <code>.get(x) or default</code></h2>
+<pre><code>float(item.get("valor") or 0)</code></pre>
+  <p>Por que não <code>.get("valor", 0)</code>? Porque a Bling pode retornar
+  <code>"valor": null</code>. Com <code>.get(k, 0)</code> você recebe <code>None</code>
+  (a chave existe!) e <code>float(None)</code> explode. O <code>or</code> trata
+  <code>None</code>, <code>""</code> e <code>0</code> de uma vez.</p>
+
+  <h2 id="payload">6.5 Montagem do payload — campo por campo</h2>
+
+  <h3>Data de operação (form → pedido → hoje)</h3>
+<pre><code>if data_base:
+    data_operacao = data_base.strip()[:10]
+else:
+    data_saida_raw = (pedido.get("dataSaida") or "").strip()
+    if data_saida_raw and data_saida_raw != "0000-00-00":
+        data_operacao = data_saida_raw[:10]
+    else:
+        data_operacao = datetime.now().strftime("%Y-%m-%d")</code></pre>
+  <p>O <code>[:10]</code> corta <code>"2026-08-11 00:00:00"</code> → <code>"2026-08-11"</code>.
+  O teste <code>!= "0000-00-00"</code> trata a <em>zero date</em> legada do MySQL do Bling.</p>
+
+  <h3>Contato — o do pedido é resumido, o do cadastro tem IE e endereço</h3>
+<pre><code>numero_doc = ((contato_completo.get("numeroDocumento") or "")
+              or (contato_pedido.get("numeroDocumento") or "")).strip()
+
+contato_nf = {
+    "nome": (contato_completo.get("nome") or contato_pedido.get("nome") or "").strip(),
+    "tipoPessoa": contato_completo.get("tipoPessoa") or contato_pedido.get("tipoPessoa") or "F",
+    "numeroDocumento": numero_doc,
+}
+if ie := (contato_completo.get("ie") or "").strip():
+    contato_nf["ie"] = ie   # só PJ; enviar vazio pode gerar rejeição</code></pre>
+  <div class="box"><span class="tag">Padrão de campo opcional</span>
+    <p>Só inclua a chave se houver valor. Enviar <code>"ie": ""</code> costuma gerar rejeição na SEFAZ.</p></div>
+  <p>Truncamentos (<code>[:60]</code>, <code>[:8]</code>, <code>[:2]</code>) respeitam os limites do
+  layout da NF-e. O CEP tem hífens removidos.</p>
+
+  <h3>Itens</h3>
+<pre><code>item_nf = {
+    "codigo":     str(item.get("codigo") or ""),
+    "descricao":  str(item.get("descricao") or "Produto"),
+    "unidade":    str(item.get("unidade") or "UN"),
+    "quantidade": float(item.get("quantidade") or 1),
+    "valor":      float(item.get("valor") or 0),
+}
+if (aliq := float(item.get("aliquotaIPI") or 0)) &gt; 0:
+    item_nf["aliquotaIPI"] = aliq   # zero causa rejeição — omitir</code></pre>
+
+  <h3>Parcelas — recálculo de vencimento (a lógica mais sutil)</h3>
+<pre><code>if data_base and data_saida_original and data_venc_str:
+    dt_base_orig = datetime.strptime(data_saida_original, "%Y-%m-%d")
+    dt_venc      = datetime.strptime(data_venc_str, "%Y-%m-%d")
+    ddl = max(0, (dt_venc - dt_base_orig).days)      # dias de prazo
+    data_venc_str = (dt_operacao + timedelta(days=ddl)).strftime("%Y-%m-%d")</code></pre>
+  <p>Se o usuário emite com data retroativa, os vencimentos precisam <strong>acompanhar</strong>,
+  preservando o prazo:</p>
+  <p>$$\text{DDL} = \text{venc}_{\text{original}} - \text{saída}_{\text{original}}$$</p>
+  <p>$$\text{venc}_{\text{novo}} = \text{data\_operação} + \text{DDL}$$</p>
+  <p><strong>Exemplo:</strong> pedido de 01/08 com vencimento 31/08 (DDL = 30). Emitindo com
+  <code>data_base=05/08</code> → novo vencimento 04/09. Sem esse recálculo a parcela venceria
+  <em>antes</em> da emissão.</p>
+  <p><code>max(0, ...)</code> impede DDL negativo. O <code>except ValueError: pass</code> mantém a
+  data original se o parse falhar — degradação graciosa.</p>
+<pre><code># Fallback obrigatório: o Bling exige ao menos 1 parcela
+if not parcelas_nf:
+    total = float(pedido.get("total") or pedido.get("totalProdutos") or 0)
+    parcelas_nf.append({"data": data_operacao, "valor": total})</code></pre>
+
+  <h3>Transporte</h3>
+<pre><code>transporte_nf = {
+    "fretePorConta": transporte_pedido.get("fretePorConta", 9),  # 9 = sem frete
+    "volumes": [],   # obrigatório no schema, pode ser vazio
+}</code></pre>
+  <p>Códigos: <code>0</code> remetente (CIF), <code>1</code> destinatário (FOB),
+  <code>9</code> sem frete. A <code>etiqueta</code> é o endereço impresso no DANFE.</p>
+
+  <h3>O truque das observações — evitando XML duplicado</h3>
+<pre><code>observacoes_finais = f"Pedido Original: {pedido_id}"
+if observacoes:
+    observacoes_finais = f"{observacoes} | {observacoes_finais}"
+payload["observacoes"] = observacoes_finais</code></pre>
+  <div class="box warn"><span class="tag">Bug real resolvido</span>
+    <p>O Bling rejeita com <em>“Já existe uma nota fiscal com este XML”</em> quando dois pedidos
+    geram documentos idênticos (mesmo cliente, mesmos itens, mesma data). Injetar o
+    <code>pedido_id</code> nas observações garante unicidade <strong>e</strong> rastreabilidade.</p></div>
+
+<pre><code>payload = {
+    "tipo": 1,                     # NF-e de saída
+    "dataOperacao": data_operacao,
+    "contato": contato_nf,
+    "itens": itens_nf,
+    "parcelas": parcelas_nf,
+    "transporte": transporte_nf,
+}</code></pre>
+
+  <h2 id="orquestracao">6.6 Orquestração <em>best-effort</em></h2>
+  <p>O laço principal usa <code>continue</code> em cada falha — <strong>um pedido ruim nunca
+  interrompe os demais</strong>. Se o usuário seleciona 20 pedidos e o nº 7 está sem CPF,
+  os outros 19 são emitidos.</p>
+  <p>Cada erro é registrado em <strong>dois lugares</strong>: <code>relatorio["erros"]</code>
+  (tela imediata) e <code>operacoes_nf</code> (auditoria permanente).</p>
+<pre><code>async def _salvar_operacao(db, usuario_id, pedido_id, nf_id, status, erro, email):
+    db.add(OperacaoNF(usuario_id=usuario_id, pedido_id_bling=pedido_id,
+                      nf_id_bling=nf_id, status=status,
+                      erro_descricao=erro, email_enviado=email))
+    await db.commit()   # commit por operação</code></pre>
+  <table>
+    <thead><tr><th></th><th>NF (aqui)</th><th>Produtos (M7)</th></tr></thead>
+    <tbody>
+      <tr><td>Estratégia</td><td>Commit por operação</td><td>Commit único no fim</td></tr>
+      <tr><td>Justificativa</td><td>Documento fiscal é irreversível; perder o registro é grave</td><td>Preço é reversível; atomicidade vale mais</td></tr>
+    </tbody>
+  </table>
+  <p>Se o processo cair no pedido 15, os 14 anteriores já estão persistidos. Trade-off consciente:
+  mais I/O em troca de durabilidade.</p>
+
+  <h2 id="rate">6.7 Rate limiting e assincronia da SEFAZ</h2>
+<pre><code>nf_data = await bling_client.criar_nf(access_token, payload_nf)
+await asyncio.sleep(3)      # respeita rate limit do Bling
+...
+await asyncio.sleep(5)      # dá tempo ao Bling de processar a criação
+await bling_client.enviar_nf(access_token, nf_id)</code></pre>
+  <p><code>asyncio.sleep</code> (não <code>time.sleep</code>) libera o event loop para outras
+  requisições. Custo: ~8 s por pedido. <strong>20 pedidos ≈ 3 minutos</strong> de requisição HTTP —
+  motivo para a solução do <a href="modulo8.html#background">Módulo 8</a>.</p>
+
+  <h2 id="estados">6.8 Os quatro estados possíveis</h2>
+  <table>
+    <thead><tr><th>Situação</th><th><code>status</code></th><th><code>nf_id_bling</code></th><th>O que o usuário vê</th></tr></thead>
+    <tbody>
+      <tr><td>Validação falhou</td><td><code>erro</code></td><td><code>NULL</code></td><td>“Cliente sem CPF/CNPJ”</td></tr>
+      <tr><td><code>POST /nfe</code> falhou</td><td><code>erro</code></td><td><code>NULL</code></td><td>“Falha ao criar NF: …”</td></tr>
+      <tr><td>Criada, SEFAZ falhou</td><td><code>erro</code></td><td>preenchido</td><td>“NF criada (id=X) mas falhou ao enviar”</td></tr>
+      <tr><td>Autorizada</td><td><code>emitida</code></td><td>preenchido</td><td>Sucesso + anexos</td></tr>
+    </tbody>
+  </table>
+  <div class="box err"><span class="tag">O estado que todos esquecem</span>
+    <p>O <strong>terceiro</strong> é o mais importante: a NF <em>existe</em> no Bling. Registrar o
+    <code>nf_id</code> mesmo com status <code>erro</code> permite ao usuário reenviar manualmente
+    no painel do Bling — sem isso, a nota ficaria órfã.</p></div>
+
+  <h2 id="bug">6.9 Bug a corrigir — diagnóstico em produção</h2>
+<pre><code># ❌ dentro de nf_service.emitir_nfs_massa
+await bling_client.descobrir_ids_situacoes_venda(access_token)</code></pre>
+  <p>Isso executa a <strong>cada</strong> emissão em massa: gasta uma requisição do rate limit,
+  imprime no stdout e não tem tratamento de erro. Remova e coloque num script:</p>
+<pre><code># scripts/descobrir_situacoes.py — rodar UMA vez
+import asyncio
+from db.database import AsyncSessionLocal
+from services import bling_client, token_service
+
+async def main(usuario_id: int):
+    async with AsyncSessionLocal() as db:
+        token = await token_service.get_valid_access_token(db, usuario_id)
+        await bling_client.descobrir_ids_situacoes_venda(token)
+
+asyncio.run(main(1))</code></pre>
+
+  <h2 id="pos">6.10 Pós-emissão: marcar o pedido como faturado</h2>
+<pre><code>try:
+    await bling_client.atualizar_situacao_pedido(access_token, pedido_id, 9)
+except Exception as exc:
+    logger.warning("Não foi possível atualizar situação do pedido %s: %s", pedido_id, exc)</code></pre>
+  <p>Dentro de <code>try/except</code> <strong>sem</strong> <code>continue</code>: a NF já foi emitida
+  com sucesso. Falhar aqui é cosmético — o pedido só continua aparecendo na listagem
+  <code>idSituacao=6</code>. Confirme que <code>9</code> = “Faturado” na <em>sua</em> conta usando
+  o script da seção 6.9.</p>
+
+  <h2 id="email">6.11 E-mail único com todos os anexos</h2>
+<pre><code>if relatorio["sucesso"]:
+    try:
+        await email_service.enviar_email_nfs(email_destino, anexos)
+    except Exception as exc:
+        relatorio["aviso_email"] = (
+            f"NFs emitidas com sucesso, mas falha no envio do e-mail: {exc}. "
+            "Os documentos podem ser baixados manualmente no Bling."
+        )</code></pre>
+  <p>Um e-mail para N notas (não N e-mails). Falha de SMTP <strong>nunca</strong> invalida a emissão
+  fiscal — vira <code>aviso_email</code>, não <code>erro</code>. Separação correta entre o essencial
+  (fiscal) e o acessório (notificação).</p>
+  <div class="box warn"><span class="tag">Risco de memória</span>
+    <p><code>anexos</code> acumula todos os PDFs + XMLs em RAM. Com 100 notas × ~250 KB ≈ 25 MB
+    por requisição. Para volumes maiores, grave em disco/S3 e envie links.</p></div>
+
+  <h2 id="ex">6.12 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 6</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m6e1"><label for="m6e1">Remover a chamada <code>descobrir_ids_situacoes_venda</code> do service e criar o script.</label></li>
+    <li><input type="checkbox" id="m6e2"><label for="m6e2">Emitir NF para pedido sem CPF e localizar o registro em <code>operacoes_nf</code>.</label></li>
+    <li><input type="checkbox" id="m6e3"><label for="m6e3">Calcular o DDL de um pedido com 3 parcelas e <code>data_base</code> retroativa.</label></li>
+    <li><input type="checkbox" id="m6e4"><label for="m6e4">Explicar por que <code>aliquotaIPI: 0</code> é omitido.</label></li>
+    <li><input type="checkbox" id="m6e5"><label for="m6e5">Implementar validação de dígito verificador de CPF/CNPJ.</label></li>
+    <li><input type="checkbox" id="m6e6"><label for="m6e6">Adaptar <code>emitir_nfs_massa</code> para retornar <code>RelatorioNFOut</code> em vez de <code>dict</code>.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo5.html">← Módulo 5</a><span class="spacer"></span>
+    <a rel="next" href="modulo7.html">Módulo 7 · Produtos e preços →</a></div>
+  <footer>Apostila Bling · Módulo 6 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 7 · Produtos, preços e variações</title>
+<link rel="stylesheet" href="file.css">
+<script>window.MathJax={tex:{inlineMath:[['$$','$$']]}};</script>
+<script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 7 · Semana 8</p>
+  <h1>Produtos, preços e o problema das variações</h1>
+  <p class="lead">Reajuste percentual em massa, o bug do <code>PUT</code> com grade incompleta, herança de preço e resiliência por item.</p>
+
+  <h2 id="regra">7.1 A regra de negócio</h2>
+  <p>Aplicar um percentual a todos os produtos de uma categoria:</p>
+  <p>$$P_{\text{novo}} = \text{round}\left(P_{\text{antigo}} \times \left(1 + \frac{p}{100}\right),\ 2\right)$$</p>
+<pre><code>preco_novo = round(preco_anterior * (1 + percentual / 100), 2)</code></pre>
+  <div class="box"><span class="tag">Por que arredondar?</span>
+    <p>Ponto flutuante IEEE-754 não representa decimais exatamente:
+    <code>10.5 * 1.1 = 11.549999999999999</code>. Sem <code>round</code>, o Bling receberia um
+    preço com 15 casas decimais.</p></div>
+  <div class="box tip"><span class="tag">Para produção</span>
+    <p>Use <code>Decimal</code> com <code>ROUND_HALF_UP</code> — é o padrão contábil brasileiro:</p>
+<pre><code>from decimal import Decimal, ROUND_HALF_UP
+novo = (Decimal(str(preco)) * (1 + Decimal(str(pct)) / 100)) \
+       .quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)</code></pre></div>
+
+  <h2 id="variacoes">7.2 O bug das variações</h2>
+  <p><code>GET /produtos</code> retorna variações <strong>incompletas</strong> (sem preço).
+  Como o <code>PUT /produtos/{id}</code> exige o array <strong>completo</strong>, enviar o objeto da
+  listagem provoca <code>400 Bad Request</code>.</p>
+<pre><code>tem_variacoes = bool(produto.get("variacoes"))
+
+if tem_variacoes:
+    # Busca o detalhe individual para obter variações com preço
+    produto_completo = await bling_client.get_produto_detalhe(access_token, produto["id"])
+    payload = _aplicar_percentual_com_variacoes(produto_completo, percentual)
+
+    # Atualiza o relatório com o preço do detalhe (mais preciso)
+    preco_anterior = float(produto_completo.get("preco") or preco_anterior)
+    preco_novo = round(preco_anterior * (1 + percentual / 100), 2)
+    entrada.update({"preco_anterior": preco_anterior, "preco_novo": preco_novo})
+else:
+    payload = {**produto, "preco": preco_novo}   # PUT simples</code></pre>
+  <div class="box err"><span class="tag">O detalhe crítico do spread</span>
+    <p><code>{**produto, "preco": novo}</code> copia todos os campos originais e sobrescreve só
+    <code>preco</code>. Fundamental porque o <code>PUT</code> da Bling é <strong>substituição
+    total</strong>, não <em>patch</em>. Enviar apenas <code>{"preco": X}</code> apagaria nome,
+    código, estoque e tributação do produto.</p>
+    <p>É por isso que o schema <code>BlingProduto</code> serve só para leitura: ele mapeia ~6 campos,
+    o produto real tem dezenas.</p></div>
+
+  <h2 id="heranca">7.3 Herança de preço nas variações</h2>
+<pre><code>def _aplicar_percentual_com_variacoes(produto: dict, percentual: float) -&gt; dict:
+    """
+    Aplica o percentual ao produto pai e a cada variação que tem preço próprio.
+    Variações com preco=0 herdam o preço do pai no Bling — não alteramos o campo
+    delas para não sobrescrever a herança.
+    O array 'variacoes' COMPLETO é obrigatório no PUT de produtos com grade.
+    """
+    preco_pai      = float(produto.get("preco") or 0)
+    novo_preco_pai = round(preco_pai * (1 + percentual / 100), 2)
+
+    novas_variacoes: list[dict] = []
+    for variacao in produto.get("variacoes") or []:
+        preco_var = float(variacao.get("preco") or 0)
+        if preco_var &gt; 0:
+            # Variação tem preço individual — aplica o mesmo percentual
+            novas_variacoes.append({**variacao,
+                                    "preco": round(preco_var * (1 + percentual/100), 2)})
+        else:
+            # Variação herda do pai — mantém como está, Bling gerencia internamente
+            novas_variacoes.append(variacao)
+
+    return {**produto, "preco": novo_preco_pai, "variacoes": novas_variacoes}</code></pre>
+  <div class="box warn"><span class="tag">Regra crítica</span>
+    <p><code>preco = 0</code> numa variação significa <em>herança</em> (“Utilizar informações do
+    produto pai”), não “de graça”. Alterar esse campo desligaria a herança e congelaria o preço —
+    quebrando o comportamento esperado pelo lojista. Preservar o <code>0</code> é a decisão correta.</p></div>
+
+  <h2 id="resiliencia">7.4 Resiliência por item</h2>
+<pre><code>for produto in produtos:
+    preco_anterior = float(produto.get("preco") or 0)
+    preco_novo     = round(preco_anterior * (1 + percentual / 100), 2)
+
+    entrada = {
+        "nome":           produto.get("nome") or "—",
+        "preco_anterior": preco_anterior,
+        "preco_novo":     preco_novo,
+    }
+
+    try:
+        ...
+        await bling_client.atualizar_produto(access_token, produto["id"], payload)
+        resultados.append(entrada)
+        db.add(AtualizacaoPreco(
+            usuario_id       = usuario_id,
+            produto_id_bling = str(produto["id"]),
+            nome_produto     = produto.get("nome"),
+            preco_anterior   = preco_anterior,
+            preco_novo       = preco_novo,
+        ))
+    except Exception as exc:
+        # Falha isolada — registra e segue para o próximo produto (antes era 500)
+        logger.error("Falha ao atualizar '%s': %s", produto.get("nome"), exc)
+        erros.append(entrada)
+
+if resultados:
+    await db.commit()     # commit único no final</code></pre>
+  <p>O <code>entrada</code> é construído <strong>antes</strong> do <code>try</code> e reutilizado nos
+  dois caminhos — evita duplicação e garante que o relatório de erros também mostre os preços
+  tentados. O <code>if resultados:</code> evita um commit vazio quando tudo falha.</p>
+
+  <h2 id="listagem">7.5 Listagem com dois modos</h2>
+<pre><code>@router.get("/")
+async def listar_produtos(request, categoria_id: str = None, db=Depends(get_db)):
+    """
+    Sem categoria_id → carrega só o select de categorias.
+    Com categoria_id → carrega categorias + produtos para preview antes de atualizar.
+    """
+    ...
+    categorias = await bling_client.get_categorias(access_token)
+    produtos = []
+    if categoria_id:
+        produtos = await bling_client.get_produtos(access_token, categoria_id=categoria_id)</code></pre>
+  <p>Evita carregar milhares de produtos no primeiro acesso. Sem token, degrada com elegância em
+  vez de retornar 500:</p>
+<pre><code>context={"produtos": [], "categorias": [],
+         "erro": "Integração com Bling inativa. Conecte na dashboard."}</code></pre>
+
+  <h2 id="debitos">7.6 Débitos técnicos</h2>
+  <ul>
+    <li><strong>Sem paginação:</strong> <code>limite=100</code> em <code>get_produtos</code>.
+    Categorias com mais de 100 itens são silenciosamente truncadas →
+    <a href="modulo8.html#paginacao">solução no M8</a>.</li>
+    <li><strong>Sem rate limit no loop:</strong> ao contrário do <code>nf_service</code>, não há
+    <code>asyncio.sleep</code>. Com 100 produtos você pode estourar o limite do Bling.
+    Adicione <code>await asyncio.sleep(0.5)</code>.</li>
+    <li><strong>Sem confirmação:</strong> <code>POST /produtos/atualizar</code> altera preços
+    irreversivelmente sem <em>dry-run</em>. Sugestão: checkbox “apenas simular”.</li>
+  </ul>
+
+  <h2 id="ex">7.7 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 7</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m7e1"><label for="m7e1">Atualizar uma categoria com +10% e conferir <code>atualizacoes_preco</code>.</label></li>
+    <li><input type="checkbox" id="m7e2"><label for="m7e2">Criar um produto com grade no Bling e seguir o caminho <code>tem_variacoes=True</code>.</label></li>
+    <li><input type="checkbox" id="m7e3"><label for="m7e3">Explicar o que aconteceria com <code>payload = {"preco": novo}</code> (sem spread).</label></li>
+    <li><input type="checkbox" id="m7e4"><label for="m7e4">Implementar o modo “simular” (calcula e exibe, não faz PUT).</label></li>
+    <li><input type="checkbox" id="m7e5"><label for="m7e5">Migrar os cálculos para <code>Decimal</code>.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo6.html">← Módulo 6</a><span class="spacer"></span>
+    <a rel="next" href="modulo8.html">Módulo 8 · Frontend e produção →</a></div>
+  <footer>Apostila Bling · Módulo 7 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

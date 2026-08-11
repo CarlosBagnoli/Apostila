@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 4 · OAuth2 Bling e ciclo do token</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 4 · Semana 4</p>
+  <h1>OAuth2 com o Bling e ciclo de vida do token</h1>
+  <p class="lead">Authorization Code, proteção anti-CSRF com <code>state</code>, Basic Auth na troca e refresh automático transparente.</p>
+
+  <h2 id="porque">4.1 Por que OAuth2 e não API key?</h2>
+  <p>O usuário autoriza sua aplicação <strong>sem</strong> entregar a senha do Bling, com escopos
+  limitados e possibilidade de revogação a qualquer momento.</p>
+
+  <h2 id="fluxo">4.2 O fluxo Authorization Code</h2>
+  <div class="diagram">1. GET /auth/bling/conectar
+   → gera state, salva em cookie, redireciona para bling.com.br/oauth/authorize
+2. Usuário autoriza no Bling
+3. Bling → GET /auth/bling/callback?code=XYZ&amp;state=ABC
+4. Compara state (anti-CSRF)
+5. POST /oauth/token (Basic Auth) com grant_type=authorization_code
+6. Recebe access_token (1h) + refresh_token (30d)
+7. token_service.save_token() → banco</div>
+
+<pre><code>@router.get("/bling/conectar")
+async def bling_conectar(request: Request):
+    state = secrets.token_hex(16)
+    url = (
+        "https://www.bling.com.br/Api/v3/oauth/authorize"
+        f"?response_type=code"
+        f"&amp;client_id={BLING_ID}"
+        f"&amp;redirect_uri={BLING_REDIR}"
+        f"&amp;state={state}"
+    )
+    resp = RedirectResponse(url)
+    resp.set_cookie("oauth_state", state, httponly=True, max_age=300)
+    return resp</code></pre>
+
+  <h2 id="state">4.3 O parâmetro <code>state</code></h2>
+<pre><code>if request.cookies.get("oauth_state") != state:
+    return RedirectResponse("/dashboard?erro=oauth_state_invalido")</code></pre>
+  <div class="box err"><span class="tag">Vetor de ataque</span>
+    <p>Sem o <code>state</code>, um atacante poderia induzir a vítima a vincular a
+    <strong>conta Bling do atacante</strong> à conta dela na plataforma — passando a receber
+    ou manipular dados fiscais. Use <code>secrets</code> (CSPRNG), nunca <code>random</code>.</p></div>
+  <p>O cookie expira em 300 s: tempo suficiente para autorizar, curto para replay.</p>
+
+  <h2 id="basic">4.4 Basic Auth na troca de token</h2>
+<pre><code>def _basic_auth_header() -> str:
+    credenciais = f"{BLING_CLIENT_ID}:{BLING_CLIENT_SECRET}"
+    return f"Basic {base64.b64encode(credenciais.encode()).decode()}"</code></pre>
+  <p>Base64 <strong>não é criptografia</strong> — é apenas transporte; a segurança vem do HTTPS.
+  É exigência específica do endpoint <code>/oauth/token</code>; os demais usam <code>Bearer</code>.</p>
+
+  <h2 id="persistencia">4.5 Persistência com token único</h2>
+<pre><code>await db.execute(
+    update(BlingToken)
+    .where(BlingToken.usuario_id == usuario_id, BlingToken.ativo == True)
+    .values(ativo=False)
+)
+expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+db.add(BlingToken(usuario_id=usuario_id, access_token=access_token,
+                  refresh_token=refresh_token, expires_at=expires_at, ativo=True))
+await db.commit()</code></pre>
+  <div class="box"><span class="tag">Invariante</span>
+    <p><strong>No máximo um token ativo por usuário.</strong> Sem a desativação prévia,
+    <code>scalar_one_or_none()</code> em <code>get_valid_access_token</code> levantaria
+    <code>MultipleResultsFound</code> no segundo <em>conectar</em>.</p></div>
+  <p>O Bling retorna <code>expires_in</code> (segundos); armazenamos o <em>instante absoluto</em> —
+  mais fácil de comparar em qualquer requisição futura.</p>
+
+  <h2 id="refresh">4.6 Refresh automático — o coração da integração</h2>
+<pre><code># Margem de 60s evita race condition entre validar e usar
+if token.expires_at &gt; datetime.utcnow() + timedelta(seconds=60):
+    return token.access_token
+
+try:
+    data = await bling_client.refresh_access_token(token.refresh_token)
+    token.access_token  = data["access_token"]
+    token.refresh_token = data.get("refresh_token", token.refresh_token)
+    token.expires_at    = datetime.utcnow() + timedelta(seconds=data["expires_in"])
+    await db.commit()
+    return token.access_token
+except Exception:
+    token.ativo = False      # refresh revogado → força reconexão manual
+    await db.commit()
+    return None</code></pre>
+  <ol>
+    <li><strong>Margem de 60 s</strong> — uma emissão em massa leva minutos; sem margem, o token
+    poderia expirar no meio do lote.</li>
+    <li><strong><code>data.get("refresh_token", token.refresh_token)</code></strong> — se o Bling não
+    devolver um novo, mantém o antigo. Sobrescrever com <code>None</code> quebraria a integração
+    <em>permanentemente</em>.</li>
+    <li><strong><code>None</code> como contrato</strong> — significa “reconecte no dashboard”.
+    Todos os consumidores tratam isso.</li>
+  </ol>
+<pre><code># routers/pedidos.py — degradação graciosa
+access_token = await token_service.get_valid_access_token(db, usuario_id)
+if not access_token:
+    return templates.TemplateResponse(
+        request=request, name="pedidos.html",
+        context={"pedidos": [],
+                 "erro": "Integração com Bling inativa. Conecte na dashboard."})</code></pre>
+
+  <div class="box warn"><span class="tag">Débito técnico #7</span>
+    <p>Você usa <code>datetime.utcnow()</code> (<em>naive</em>) mas o model tem
+    <code>DateTime(timezone=True)</code> (<em>aware</em>). Comparar os dois levanta
+    <code>TypeError</code>. Padronize:</p>
+<pre><code>from datetime import datetime, timezone
+agora = datetime.now(timezone.utc)</code></pre>
+    <p>Ou mantenha <em>naive</em> e remova <code>timezone=True</code> do model. O essencial é
+    <strong>não misturar</strong>.</p></div>
+
+  <h2 id="ciclo">4.7 Ciclo completo do token</h2>
+  <div class="diagram">save_token ──► [ativo=true, expires_at=+1h]
+                     │
+     get_valid_access_token (cada operação)
+                     │
+         ┌───────────┴───────────┐
+    válido?                   expirado?
+       │                          │
+   retorna              refresh_access_token
+                                  │
+                        ┌─────────┴─────────┐
+                     sucesso              falha
+                        │                   │
+                  atualiza+retorna    ativo=false → None</div>
+
+  <h3>Desconectar</h3>
+<pre><code>@router.post("/bling/desconectar")
+async def bling_desconectar(request: Request, db: AsyncSession = Depends(get_db)):
+    usuario_id = get_usuario_id(request)
+    if not usuario_id:
+        return RedirectResponse("/auth/login")
+    await token_service.deactivate_token(db, usuario_id)
+    return RedirectResponse("/dashboard", status_code=303)</code></pre>
+  <p>Note: <code>POST</code>, não <code>GET</code> — operação que altera estado.</p>
+
+  <h2 id="ex">4.8 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 4</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m4e1"><label for="m4e1">Percorrer o fluxo OAuth e conferir a linha em <code>bling_tokens</code>.</label></li>
+    <li><input type="checkbox" id="m4e2"><label for="m4e2">Forçar expiração: <code>UPDATE bling_tokens SET expires_at = NOW() - INTERVAL '2 hours';</code> — acessar <code>/pedidos/</code> e observar o refresh.</label></li>
+    <li><input type="checkbox" id="m4e3"><label for="m4e3">Corromper o <code>refresh_token</code> e explicar o comportamento do dashboard.</label></li>
+    <li><input type="checkbox" id="m4e4"><label for="m4e4">Implementar <code>TokenStatusOut.expira_em_breve</code> no template do dashboard.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo3.html">← Módulo 3</a><span class="spacer"></span>
+    <a rel="next" href="modulo5.html">Módulo 5 · bling_client →</a></div>
+  <footer>Apostila Bling · Módulo 4 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

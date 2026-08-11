@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 3 · Autenticação: bcrypt + JWT</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 3 · Semana 3</p>
+  <h1>Autenticação: bcrypt + JWT em cookie</h1>
+  <p class="lead">Hash de senha com salt, token assinado, cookie HttpOnly e o padrão Post/Redirect/Get.</p>
+
+  <h2 id="bcrypt">3.1 Hash de senha</h2>
+<pre><code>import bcrypt
+
+def _hash_senha(senha: str) -> str:
+    return bcrypt.hashpw(senha.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+def _verificar_senha(senha: str, senha_hash: str) -> bool:
+    return bcrypt.checkpw(senha.encode("utf-8"), senha_hash.encode("utf-8"))</code></pre>
+  <ul>
+    <li><code>gensalt()</code> gera salt aleatório <strong>por senha</strong> → senhas iguais geram hashes diferentes.</li>
+    <li>O salt fica <strong>embutido</strong> no hash: <code>$2b$12$&lt;salt22&gt;&lt;hash31&gt;</code>.</li>
+    <li><code>12</code> é o <em>cost factor</em>: 2<sup>12</sup> = 4096 rounds. +1 dobra o custo do atacante — e o seu.</li>
+    <li><code>checkpw</code> compara em tempo constante → resiste a <em>timing attacks</em>.</li>
+  </ul>
+  <div class="box warn"><span class="tag">Detalhe</span>
+    <p>Bcrypt trunca em 72 bytes. Se aceitar senhas longas, aplique SHA-256 antes do <code>hashpw</code>.</p></div>
+
+  <h2 id="jwt">3.2 Geração do JWT</h2>
+<pre><code>def _criar_jwt(usuario_id: int) -> str:
+    expira = datetime.utcnow() + timedelta(minutes=JWT_MINUTES)
+    return jwt.encode({"sub": str(usuario_id), "exp": expira},
+                      JWT_SECRET, algorithm=JWT_ALG)</code></pre>
+  <p>Estrutura <code>header.payload.signature</code> em Base64URL. O payload é
+  <strong>legível por qualquer um</strong> — nunca coloque senha ali. A assinatura HMAC-SHA256
+  garante apenas <em>integridade</em>.</p>
+  <p><code>sub</code> é string por exigência da RFC 7519 — por isso <code>dependencies.py</code> faz <code>int(sub)</code>.</p>
+
+  <h2 id="cookie">3.3 Cookie HttpOnly</h2>
+<pre><code>response.set_cookie(
+    "access_token", token,
+    httponly=True,     # JavaScript não acessa → mitiga XSS
+    samesite="lax",    # mitiga CSRF, permite o redirect do OAuth Bling
+    max_age=JWT_MINUTES * 60,
+    secure=True,       # ← ADICIONE em produção (só HTTPS)
+)</code></pre>
+  <div class="box"><span class="tag">Por que cookie e não header?</span>
+    <p>O front é Jinja2 (navegação por links e forms), não SPA. O navegador envia o cookie
+    automaticamente; com <code>Authorization</code> seria necessário JS em cada requisição.</p></div>
+  <div class="box err"><span class="tag">Por que "lax" e não "strict"?</span>
+    <p>Com <code>strict</code>, o cookie <strong>não</strong> seria enviado no retorno de
+    <code>bling.com.br → /auth/bling/callback</code>, e <code>get_usuario_id</code> devolveria
+    <code>None</code>, quebrando o OAuth.</p></div>
+
+  <h2 id="sessao">3.4 Leitura da sessão</h2>
+<pre><code># dependencies.py
+def get_usuario_id(request: Request) -> int | None:
+    token = request.cookies.get("access_token")
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+        sub = payload.get("sub")
+        return int(sub) if sub else None
+    except (JWTError, ValueError):
+        return None</code></pre>
+  <p><code>jwt.decode</code> valida assinatura <strong>e</strong> <code>exp</code> automaticamente.
+  <code>algorithms=[...]</code> é obrigatório: sem isso um atacante poderia forjar <code>alg: none</code>.</p>
+  <p>Retornar <code>None</code> em vez de levantar <code>HTTPException</code> é decisão consciente:
+  cada router decide se redireciona para <code>/auth/login</code> ou exibe aviso.</p>
+
+  <h3>Variante <code>Depends</code> para endpoints de API</h3>
+<pre><code>from fastapi import Depends, HTTPException, status
+
+async def usuario_autenticado(request: Request) -> int:
+    uid = get_usuario_id(request)
+    if not uid:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão expirada")
+    return uid</code></pre>
+  <p>Mantenha a versão simples para o callback OAuth.</p>
+
+  <h2 id="fluxos">3.5 Fluxos completos</h2>
+  <h3>Cadastro</h3>
+<pre><code>result = await db.execute(select(Usuario).where(Usuario.email == email))
+if result.scalar_one_or_none():
+    return templates.TemplateResponse(
+        request=request, name="cadastro.html",
+        context={"erro": "E-mail já cadastrado."}, status_code=409)
+
+db.add(Usuario(email=email, senha_hash=_hash_senha(senha)))
+await db.commit()
+return RedirectResponse("/auth/login?cadastro=ok", status_code=303)</code></pre>
+
+  <h3>Login</h3>
+<pre><code>usuario = result.scalar_one_or_none()
+
+# Mensagem genérica evita user enumeration
+if not usuario or not _verificar_senha(senha, usuario.senha_hash):
+    return templates.TemplateResponse(
+        request=request, name="login.html",
+        context={"erro": "E-mail ou senha inválidos."}, status_code=401)
+
+resp = RedirectResponse("/dashboard", status_code=303)
+return _set_jwt_cookie(resp, _criar_jwt(usuario.id))</code></pre>
+  <p><strong>Logout:</strong> <code>delete_cookie("access_token")</code> + <code>303</code>.</p>
+
+  <div class="box tip"><span class="tag">Por que 303 e não 302?</span>
+    <p>Após um <code>POST</code>, o <code>303 See Other</code> obriga o navegador a fazer <code>GET</code>
+    no destino. Com <code>302</code> alguns clientes repetiriam o <code>POST</code> — é o padrão
+    <em>Post/Redirect/Get</em>, que também impede reenvio ao apertar F5.</p></div>
+
+  <h2 id="pydantic">3.6 Integrando os schemas Pydantic</h2>
+  <p>Seus routers usam <code>Form(...)</code> direto. Os schemas existem para validar antes de persistir:</p>
+<pre><code>from pydantic import ValidationError
+from schemas.schemas import UsuarioCadastroInput
+
+try:
+    dados = UsuarioCadastroInput(email=email, senha=senha)
+except ValidationError:
+    return templates.TemplateResponse(
+        request=request, name="cadastro.html",
+        context={"erro": "E-mail inválido ou senha com menos de 6 caracteres."},
+        status_code=422,
+    )
+db.add(Usuario(email=dados.email, senha_hash=_hash_senha(dados.senha)))</code></pre>
+
+  <h2 id="ex">3.7 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 3</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m3e1"><label for="m3e1">Cadastrar-se e inspecionar a linha em <code>usuarios</code>; identificar salt e cost no hash.</label></li>
+    <li><input type="checkbox" id="m3e2"><label for="m3e2">Colar o JWT em <em>jwt.io</em> e ler o payload.</label></li>
+    <li><input type="checkbox" id="m3e3"><label for="m3e3">Trocar <code>JWT_SECRET_KEY</code>, recarregar <code>/dashboard</code> e explicar o resultado.</label></li>
+    <li><input type="checkbox" id="m3e4"><label for="m3e4">Implementar o bloco Pydantic da seção 3.6 no cadastro.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo2.html">← Módulo 2</a><span class="spacer"></span>
+    <a rel="next" href="modulo4.html">Módulo 4 · OAuth2 Bling →</a></div>
+  <footer>Apostila Bling · Módulo 3 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

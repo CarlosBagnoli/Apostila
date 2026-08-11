@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 2 · SQLAlchemy async + PostgreSQL</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 2 · Semana 2</p>
+  <h1>Banco de dados: SQLAlchemy 2.0 async + PostgreSQL</h1>
+  <p class="lead">Engine assíncrono com <code>asyncpg</code>, models de auditoria, criação de tabelas e migrações com Alembic.</p>
+
+  <h2 id="engine">2.1 O engine assíncrono</h2>
+<pre><code># db/database.py
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.orm import declarative_base
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")  # postgresql+asyncpg://...
+
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,          # True apenas para debug de SQL
+    pool_pre_ping=True,  # testa a conexão antes de usar
+    pool_size=10,
+    max_overflow=20,
+)
+
+AsyncSessionLocal = async_sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,  # crítico em async
+)
+
+Base = declarative_base()
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session</code></pre>
+
+  <p>Anatomia da URL:</p>
+  <div class="diagram">postgresql+asyncpg://user:senha@host:5432/banco
+└─dialeto─┘ └driver┘</div>
+
+  <div class="box"><span class="tag">Conceito-chave</span>
+    <p><strong>Por que <code>expire_on_commit=False</code>?</strong> Por padrão o SQLAlchemy marca
+    objetos como “expirados” após <code>commit()</code>. Ao acessar <code>usuario.email</code> depois,
+    ele tentaria um novo SELECT — impossível de forma implícita em contexto async, gerando
+    <code>MissingGreenlet</code>.</p></div>
+
+  <h2 id="models">2.2 Models — versão PostgreSQL</h2>
+  <p>Diferenças frente ao MySQL: <code>Enum</code> nativo precisa de <code>name=</code>;
+  <code>Numeric(10,2)</code> retorna <code>Decimal</code>.</p>
+<pre><code># db/models.py
+import enum
+from sqlalchemy import (Column, Integer, String, Text, Boolean,
+                        DateTime, Enum, Numeric, ForeignKey, Index)
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from db.database import Base
+
+
+class StatusNF(str, enum.Enum):
+    emitida = "emitida"
+    erro = "erro"
+
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    email      = Column(String(255), unique=True, nullable=False, index=True)
+    senha_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    tokens             = relationship("BlingToken", back_populates="usuario",
+                                      cascade="all, delete-orphan")
+    operacoes_nf       = relationship("OperacaoNF", back_populates="usuario",
+                                      cascade="all, delete-orphan")
+    atualizacoes_preco = relationship("AtualizacaoPreco", back_populates="usuario",
+                                      cascade="all, delete-orphan")
+
+
+class BlingToken(Base):
+    __tablename__ = "bling_tokens"
+
+    id            = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id    = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"),
+                           nullable=False)
+    access_token  = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=False)
+    expires_at    = Column(DateTime(timezone=True), nullable=False)
+    ativo         = Column(Boolean, default=True, nullable=False)
+
+    usuario = relationship("Usuario", back_populates="tokens")
+
+    # Acelera o SELECT de token ativo (usado em toda requisição à Bling)
+    __table_args__ = (Index("ix_token_usuario_ativo", "usuario_id", "ativo"),)
+
+
+class OperacaoNF(Base):
+    __tablename__ = "operacoes_nf"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id      = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"),
+                             nullable=False)
+    pedido_id_bling = Column(String(50), nullable=False)
+    nf_id_bling     = Column(String(50), nullable=True)   # None se falhou
+    status          = Column(Enum(StatusNF, name="status_nf"), nullable=False)
+    erro_descricao  = Column(Text, nullable=True)
+    email_enviado   = Column(String(255), nullable=True)
+    created_at      = Column(DateTime(timezone=True), server_default=func.now())
+
+    usuario = relationship("Usuario", back_populates="operacoes_nf")
+
+    __table_args__ = (Index("ix_nf_usuario_data", "usuario_id", "created_at"),)
+
+
+class AtualizacaoPreco(Base):
+    __tablename__ = "atualizacoes_preco"
+
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    usuario_id       = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"),
+                              nullable=False)
+    produto_id_bling = Column(String(50), nullable=False)
+    nome_produto     = Column(String(255), nullable=True)
+    preco_anterior   = Column(Numeric(10, 2), nullable=False)
+    preco_novo       = Column(Numeric(10, 2), nullable=False)
+    created_at       = Column(DateTime(timezone=True), server_default=func.now())
+
+    usuario = relationship("Usuario", back_populates="atualizacoes_preco")</code></pre>
+
+  <h2 id="relacional">2.3 Modelo relacional</h2>
+  <div class="diagram">usuarios (1) ──┬──(N) bling_tokens        [só 1 com ativo=true]
+               ├──(N) operacoes_nf        [auditoria de NF]
+               └──(N) atualizacoes_preco  [auditoria de preço]</div>
+  <p>As tabelas de operação são <strong>log de auditoria</strong>: nunca são atualizadas, só inseridas.
+  É isso que permite o <code>historico_nf</code> (veja <code>nfs.py</code>) e os contadores do dashboard
+  <em>sem chamar a API Bling</em>.</p>
+<pre><code># routers/nfs.py — consulta direta ao banco, não bate na Bling
+result = await db.execute(
+    select(OperacaoNF)
+    .where(OperacaoNF.usuario_id == usuario_id)
+    .order_by(OperacaoNF.created_at.desc())   # mais recentes primeiro
+)
+operacoes = result.scalars().all()</code></pre>
+
+  <h2 id="startup">2.4 Criação de tabelas no startup</h2>
+<pre><code>@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()   # ← acrescente: fecha o pool no shutdown</code></pre>
+  <p><code>run_sync</code> é necessário porque <code>create_all</code> é uma API síncrona; ele a executa
+  numa thread compatível com o event loop.</p>
+  <div class="box warn"><span class="tag">Limitação</span>
+    <p><code>create_all</code> <strong>não altera</strong> tabelas existentes. Se você mudar uma coluna,
+    ela não será modificada. Para produção → Alembic.</p></div>
+
+  <h2 id="alembic">2.5 Alembic (migrações)</h2>
+<pre><code>alembic init alembic</code></pre>
+<pre><code># alembic/env.py — trechos essenciais
+from db.database import Base, DATABASE_URL
+from db import models          # importa para registrar as tabelas
+target_metadata = Base.metadata
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("+asyncpg", ""))</code></pre>
+<pre><code>alembic revision --autogenerate -m "estrutura inicial"
+alembic upgrade head</code></pre>
+
+  <h2 id="ex">2.6 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 2</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m2e1"><label for="m2e1">Criar o banco: <code>createdb bling_db</code>.</label></li>
+    <li><input type="checkbox" id="m2e2"><label for="m2e2">Subir a app e verificar no <code>psql</code>: <code>\dt</code> e <code>\d operacoes_nf</code>.</label></li>
+    <li><input type="checkbox" id="m2e3"><label for="m2e3">Explicar por que <code>nf_id_bling</code> é <em>nullable</em>.</label></li>
+    <li><input type="checkbox" id="m2e4"><label for="m2e4">Adicionar <code>ondelete="CASCADE"</code> e testar apagar um usuário.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo1.html">← Módulo 1</a><span class="spacer"></span>
+    <a rel="next" href="modulo3.html">Módulo 3 · Autenticação →</a></div>
+  <footer>Apostila Bling · Módulo 2 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apostila · Plataforma de Automação Bling</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav>
+    <a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a>
+  </nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap" style="grid-template-columns:1fr">
+<main>
+  <p class="eyebrow">FastAPI · SQLAlchemy 2.0 async · PostgreSQL · Bling API v3</p>
+  <h1>Plataforma de Automação Bling</h1>
+  <p class="lead">Apostila técnica em 8 módulos, escrita a partir do código real do projeto:
+  autenticação JWT em cookie, OAuth2 com refresh automático, emissão de NF-e em massa e
+  atualização de preços com variações.</p>
+
+  <div class="progress-box" id="global-progress">
+    <strong>Seu progresso</strong>
+    <div class="txt" style="color:var(--fg-dim);font-size:.85rem">calculando…</div>
+    <div class="bar"><span></span></div>
+  </div>
+
+  <h2 id="arq">Arquitetura</h2>
+  <div class="diagram">┌─────────────┐   HTTP/Jinja2   ┌──────────────────────────────────┐
+│  Navegador  │ ──────────────► │  FastAPI (main.py)               │
+└─────────────┘                 │  ├── routers/  (HTTP + Form)     │
+                                │  ├── services/ (regra de negócio)│
+                                │  └── db/       (persistência)    │
+                                └────────┬──────────────┬──────────┘
+                                  asyncpg│              │httpx
+                                         ▼              ▼
+                                 ┌──────────────┐  ┌──────────────┐
+                                 │ PostgreSQL   │  │ Bling API v3 │
+                                 └──────────────┘  └──────────────┘</div>
+
+  <table>
+    <thead><tr><th>Camada</th><th>Responsabilidade</th><th>Nunca faz</th></tr></thead>
+    <tbody>
+      <tr><td><code>routers/</code></td><td>Ler <code>Form</code>, checar sessão, renderizar template</td><td>Chamar <code>httpx</code>, montar payload de NF</td></tr>
+      <tr><td><code>services/</code></td><td>Regra de negócio, orquestração, payloads</td><td>Renderizar HTML</td></tr>
+      <tr><td><code>bling_client.py</code></td><td><strong>Único</strong> que fala HTTP com o Bling</td><td>Conhecer regra de negócio</td></tr>
+      <tr><td><code>db/</code></td><td>Models e sessão</td><td>Lógica de aplicação</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="mods">Módulos</h2>
+  <div class="grid">
+    <a class="mod-card" href="modulo1.html" data-checks="m1e1,m1e2,m1e3">
+      <span class="num">MÓDULO 01</span><h3>Fundamentos e ambiente</h3>
+      <p>ASGI, async/await, venv, <code>.env</code>, estrutura de pastas.</p>
+      <span class="meta"><span class="pill">Semana 1</span><span class="card-progress">0/3</span></span>
+    </a>
+    <a class="mod-card" href="modulo2.html" data-checks="m2e1,m2e2,m2e3,m2e4">
+      <span class="num">MÓDULO 02</span><h3>Banco: SQLAlchemy async + PostgreSQL</h3>
+      <p>Engine asyncpg, <code>expire_on_commit</code>, models, Alembic.</p>
+      <span class="meta"><span class="pill">Semana 2</span><span class="card-progress">0/4</span></span>
+    </a>
+    <a class="mod-card" href="modulo3.html" data-checks="m3e1,m3e2,m3e3,m3e4">
+      <span class="num">MÓDULO 03</span><h3>Autenticação: bcrypt + JWT</h3>
+      <p>Salt, cost factor, cookie HttpOnly, SameSite, PRG.</p>
+      <span class="meta"><span class="pill">Semana 3</span><span class="card-progress">0/4</span></span>
+    </a>
+    <a class="mod-card" href="modulo4.html" data-checks="m4e1,m4e2,m4e3,m4e4">
+      <span class="num">MÓDULO 04</span><h3>OAuth2 Bling e ciclo do token</h3>
+      <p><code>state</code> anti-CSRF, Basic Auth, refresh automático.</p>
+      <span class="meta"><span class="pill">Semana 4</span><span class="card-progress">0/4</span></span>
+    </a>
+    <a class="mod-card" href="modulo5.html" data-checks="m5e1,m5e2,m5e3">
+      <span class="num">MÓDULO 05</span><h3>Integração: bling_client.py</h3>
+      <p>Adaptador único, timeouts, tradução de erros, DANFE Base64+GZIP.</p>
+      <span class="meta"><span class="pill">Semana 5</span><span class="card-progress">0/3</span></span>
+    </a>
+    <a class="mod-card" href="modulo6.html" data-checks="m6e1,m6e2,m6e3,m6e4,m6e5,m6e6">
+      <span class="num">MÓDULO 06</span><h3>Núcleo fiscal: NF-e em massa</h3>
+      <p>Os 7 passos, validação prévia, DDL, XML duplicado, 4 estados.</p>
+      <span class="meta"><span class="pill">Semanas 6–7</span><span class="card-progress">0/6</span></span>
+    </a>
+    <a class="mod-card" href="modulo7.html" data-checks="m7e1,m7e2,m7e3,m7e4,m7e5">
+      <span class="num">MÓDULO 07</span><h3>Produtos, preços e variações</h3>
+      <p>Spread de dict no PUT, herança de preço, <code>Decimal</code>.</p>
+      <span class="meta"><span class="pill">Semana 8</span><span class="card-progress">0/5</span></span>
+    </a>
+    <a class="mod-card" href="modulo8.html" data-checks="m8e1,m8e2,m8e3,m8e4,m8e5,m8e6">
+      <span class="num">MÓDULO 08</span><h3>Frontend, qualidade e produção</h3>
+      <p>Jinja2, CSRF, paginação, BackgroundTasks, testes, deploy.</p>
+      <span class="meta"><span class="pill">Semanas 9–10</span><span class="card-progress">0/6</span></span>
+    </a>
+  </div>
+
+  <h2 id="apendices">Apêndices</h2>
+  <h3>A · Débitos técnicos identificados no código</h3>
+  <table>
+    <thead><tr><th>#</th><th>Local</th><th>Problema</th><th>Onde</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><code>database.py</code></td><td>MySQL → PostgreSQL</td><td><a href="modulo2.html#engine">M2</a></td></tr>
+      <tr><td>2</td><td><code>bling_client.py</code></td><td><code>import base64/gzip</code> após um <code>return</code></td><td><a href="modulo5.html#debitos">M5</a></td></tr>
+      <tr><td>3</td><td><code>bling_client.py</code></td><td><code>get_danfe</code>/<code>get_xml</code> duplicados</td><td><a href="modulo5.html#debitos">M5</a></td></tr>
+      <tr><td>4</td><td><code>bling_client.py</code></td><td><code>print()</code> com CPF/CNPJ (LGPD)</td><td><a href="modulo5.html#debitos">M5</a></td></tr>
+      <tr><td>5</td><td><code>nf_service.py</code></td><td><code>descobrir_ids_situacoes_venda</code> em produção</td><td><a href="modulo6.html#bug">M6</a></td></tr>
+      <tr><td>6</td><td><code>nf_service.py</code></td><td>Anexos acumulados em memória</td><td><a href="modulo6.html#email">M6</a></td></tr>
+      <tr><td>7</td><td><code>token_service.py</code></td><td><code>utcnow()</code> naive vs <code>timezone=True</code></td><td><a href="modulo4.html#refresh">M4</a></td></tr>
+      <tr><td>8</td><td><code>produtos.py</code></td><td>Sem <code>asyncio.sleep</code> no loop</td><td><a href="modulo7.html#debitos">M7</a></td></tr>
+      <tr><td>9</td><td><code>produtos.py</code>/<code>pedidos.py</code></td><td>Sem paginação (limite 100)</td><td><a href="modulo8.html#paginacao">M8</a></td></tr>
+      <tr><td>10</td><td><code>pedidos.py</code></td><td>Emissão síncrona → timeout</td><td><a href="modulo8.html#background">M8</a></td></tr>
+      <tr><td>11</td><td>routers</td><td>Sem CSRF</td><td><a href="modulo8.html#csrf">M8</a></td></tr>
+      <tr><td>12</td><td><code>auth.py</code></td><td>Cookie sem <code>secure=True</code></td><td><a href="modulo3.html#cookie">M3</a></td></tr>
+      <tr><td>13</td><td>geral</td><td><code>schemas.py</code> não usado nos routers</td><td><a href="modulo3.html#pydantic">M3</a></td></tr>
+      <tr><td>14</td><td><code>main.py</code></td><td>Falta <code>engine.dispose()</code></td><td><a href="modulo2.html#startup">M2</a></td></tr>
+    </tbody>
+  </table>
+
+  <h3>B · Glossário</h3>
+  <table>
+    <thead><tr><th>Termo</th><th>Definição</th></tr></thead>
+    <tbody>
+      <tr><td>ASGI</td><td>Interface assíncrona servidor↔app Python (sucessora do WSGI)</td></tr>
+      <tr><td>Event loop</td><td>Agendador que alterna entre corrotinas nos pontos de <code>await</code></td></tr>
+      <tr><td>JWT</td><td>Token assinado auto-contido: <code>header.payload.signature</code></td></tr>
+      <tr><td>bcrypt</td><td>Hash de senha com salt e custo configurável</td></tr>
+      <tr><td>OAuth2 Auth Code</td><td>Autorização delegada via código temporário</td></tr>
+      <tr><td><code>state</code></td><td>Nonce anti-CSRF no fluxo OAuth</td></tr>
+      <tr><td>DANFE</td><td>Documento Auxiliar da NF-e (PDF de representação)</td></tr>
+      <tr><td>Chave de acesso</td><td>Identificador de 44 dígitos da NF-e</td></tr>
+      <tr><td>DDL</td><td>Dias De Lançamento — prazo entre emissão e vencimento</td></tr>
+      <tr><td>SEFAZ</td><td>Secretaria da Fazenda estadual; autoriza a NF-e</td></tr>
+      <tr><td>Best-effort</td><td>Falha isolada não interrompe o lote</td></tr>
+      <tr><td>Idempotência</td><td>Repetir a operação produz o mesmo resultado</td></tr>
+      <tr><td><code>expire_on_commit</code></td><td>Se <code>True</code>, invalida objetos após commit (quebra em async)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="pager"><span class="spacer"></span>
+    <a rel="next" href="modulo1.html">Módulo 1 · Fundamentos →</a></div>
+  <footer>Use ← → para navegar entre módulos. Progresso salvo no navegador.</footer>
+</main>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

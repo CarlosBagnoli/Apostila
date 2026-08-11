@@ -1,0 +1,108 @@
+/* ===== Apostila Bling · tema compartilhado ===== */
+:root{
+  --bg:#0f1115; --bg-soft:#171a21; --card:#1c2029; --border:#2a2f3a;
+  --fg:#e6e8ee; --fg-dim:#9aa3b2; --accent:#4ea1ff; --accent-2:#7ee0b8;
+  --warn:#ffc861; --err:#ff7b72; --ok:#7ee0b8;
+  --radius:12px; --mono:'JetBrains Mono',ui-monospace,Consolas,monospace;
+}
+[data-theme="light"]{
+  --bg:#f6f7fa; --bg-soft:#fff; --card:#fff; --border:#dfe3ea;
+  --fg:#1a1d24; --fg-dim:#5b6472; --accent:#0b62c4;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.7 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+
+/* ---- barra de progresso de leitura ---- */
+#progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:100;transition:width .1s}
+
+/* ---- topbar ---- */
+.topbar{
+  position:sticky;top:0;z-index:50;display:flex;align-items:center;gap:1rem;
+  padding:.7rem 1.2rem;background:var(--bg-soft);border-bottom:1px solid var(--border);
+}
+.topbar .brand{font-weight:700;color:var(--accent);text-decoration:none;white-space:nowrap}
+.topbar nav{display:flex;gap:.4rem;flex-wrap:wrap;flex:1}
+.topbar nav a{
+  color:var(--fg-dim);text-decoration:none;font-size:.85rem;
+  padding:.25rem .6rem;border-radius:99px;border:1px solid transparent;
+}
+.topbar nav a:hover{color:var(--fg);border-color:var(--border)}
+.topbar nav a.active{color:var(--accent);border-color:var(--accent)}
+.icon-btn{
+  background:var(--card);border:1px solid var(--border);color:var(--fg);
+  border-radius:8px;padding:.35rem .6rem;cursor:pointer;font-size:.9rem;
+}
+.icon-btn:hover{border-color:var(--accent)}
+
+/* ---- layout ---- */
+.wrap{max-width:1180px;margin:0 auto;padding:2rem 1.2rem 5rem;display:grid;grid-template-columns:1fr 240px;gap:2.5rem}
+main{min-width:0}
+.toc{position:sticky;top:5rem;align-self:start;font-size:.85rem}
+.toc h4{margin:0 0 .6rem;color:var(--fg-dim);text-transform:uppercase;letter-spacing:.06em;font-size:.7rem}
+.toc a{display:block;color:var(--fg-dim);text-decoration:none;padding:.2rem 0 .2rem .6rem;border-left:2px solid var(--border)}
+.toc a:hover,.toc a.active{color:var(--accent);border-color:var(--accent)}
+@media(max-width:900px){.wrap{grid-template-columns:1fr}.toc{display:none}}
+
+/* ---- tipografia ---- */
+h1{font-size:1.9rem;line-height:1.25;margin:0 0 .3rem}
+h2{font-size:1.35rem;margin:2.4rem 0 .8rem;padding-bottom:.3rem;border-bottom:1px solid var(--border)}
+h3{font-size:1.05rem;margin:1.6rem 0 .5rem;color:var(--accent-2)}
+.eyebrow{color:var(--accent);font-size:.75rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.lead{color:var(--fg-dim);font-size:1.02rem}
+code{font-family:var(--mono);font-size:.86em;background:var(--card);padding:.12em .38em;border-radius:5px}
+pre{background:#0b0d12;border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.1rem;overflow-x:auto;position:relative}
+[data-theme="light"] pre{background:#1b1f27}
+pre code{background:none;padding:0;color:#dbe3ef;font-size:.82rem;line-height:1.6}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;background:#232833;color:#9aa3b2;border:1px solid #333a47;
+  border-radius:6px;font-size:.7rem;padding:.2rem .5rem;cursor:pointer;opacity:0;transition:.15s}
+pre:hover .copy-btn{opacity:1}
+.copy-btn:hover{color:#fff;border-color:var(--accent)}
+
+/* ---- tabelas ---- */
+table{width:100%;border-collapse:collapse;margin:1rem 0;font-size:.88rem;display:block;overflow-x:auto}
+th,td{border:1px solid var(--border);padding:.5rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--card);font-weight:600}
+
+/* ---- callouts ---- */
+.box{border-left:4px solid var(--accent);background:var(--card);border-radius:0 var(--radius) var(--radius) 0;padding:.9rem 1.1rem;margin:1.2rem 0}
+.box.warn{border-color:var(--warn)} .box.err{border-color:var(--err)} .box.tip{border-color:var(--ok)}
+.box p:first-child{margin-top:0} .box p:last-child{margin-bottom:0}
+.box .tag{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+
+/* ---- diagrama ASCII ---- */
+.diagram{font-family:var(--mono);font-size:.78rem;line-height:1.45;white-space:pre;overflow-x:auto;
+  background:var(--card);border:1px dashed var(--border);border-radius:var(--radius);padding:1rem;color:var(--accent-2)}
+
+/* ---- cards do index ---- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:1.1rem;margin-top:1.6rem}
+.mod-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;
+  text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:.5rem;transition:.18s}
+.mod-card:hover{border-color:var(--accent);transform:translateY(-3px)}
+.mod-card .num{font-family:var(--mono);font-size:.72rem;color:var(--accent)}
+.mod-card h3{margin:0;font-size:1.02rem;color:var(--fg)}
+.mod-card p{margin:0;color:var(--fg-dim);font-size:.85rem}
+.mod-card .meta{margin-top:auto;font-size:.72rem;color:var(--fg-dim);display:flex;justify-content:space-between}
+.pill{background:var(--bg-soft);border:1px solid var(--border);border-radius:99px;padding:.1rem .5rem}
+
+/* ---- checklist persistente ---- */
+.check{list-style:none;padding:0;margin:1rem 0}
+.check li{display:flex;gap:.6rem;align-items:flex-start;padding:.4rem .6rem;border:1px solid var(--border);
+  border-radius:8px;margin-bottom:.4rem;background:var(--card)}
+.check input{margin-top:.35rem;accent-color:var(--accent);cursor:pointer;flex-shrink:0}
+.check li.done{opacity:.5} .check li.done label{text-decoration:line-through}
+.check label{cursor:pointer;font-size:.9rem}
+.progress-box{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin:1.5rem 0}
+.bar{height:8px;background:var(--bg-soft);border-radius:99px;overflow:hidden;margin-top:.5rem}
+.bar span{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-2));width:0;transition:width .3s}
+
+/* ---- paginação ---- */
+.pager{display:flex;justify-content:space-between;gap:1rem;margin-top:3rem;padding-top:1.5rem;border-top:1px solid var(--border)}
+.pager a{color:var(--accent);text-decoration:none;font-size:.9rem;background:var(--card);
+  border:1px solid var(--border);border-radius:8px;padding:.6rem .9rem}
+.pager a:hover{border-color:var(--accent)}
+.pager .spacer{flex:1}
+footer{text-align:center;color:var(--fg-dim);font-size:.78rem;padding:2rem 0}

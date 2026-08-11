@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 5 · Camada de integração bling_client.py</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 5 · Semana 5</p>
+  <h1>Camada de integração: <code>bling_client.py</code></h1>
+  <p class="lead">O adaptador único de HTTP, timeouts proporcionais, tradução de erros da Bling e o desafio do DANFE em três camadas de codificação.</p>
+
+  <h2 id="principio">5.1 Princípio do adaptador único</h2>
+  <p>Um só arquivo faz <code>httpx</code>. Benefícios: um lugar para mudar timeout, um lugar para
+  tratar erro, e todo o resto do sistema fica testável com mock.</p>
+
+  <h2 id="padrao">5.2 Padrão de todo método</h2>
+<pre><code>async def get_pedido(access_token: str, pedido_id: str) -&gt; dict:
+    async with httpx.AsyncClient(timeout=15.0) as client:   # 1. fecha conexões
+        try:
+            response = await client.get(
+                f"{BLING_BASE_URL}/pedidos/vendas/{pedido_id}",
+                headers=_bearer(access_token),
+            )
+        except httpx.ReadTimeout:                            # 2. erro de rede
+            raise ValueError(f"Timeout ao buscar pedido {pedido_id}.")
+
+    if response.is_error:                                    # 3. erro HTTP
+        raise ValueError(f"Pedido não encontrado: {_extrair_erro_bling(response)}")
+
+    return response.json().get("data", {})                   # 4. desembrulha "data"</code></pre>
+
+  <h3>Timeouts proporcionais ao custo real</h3>
+  <table>
+    <thead><tr><th>Operação</th><th>Timeout</th><th>Motivo</th></tr></thead>
+    <tbody>
+      <tr><td><code>/oauth/token</code></td><td>15 s</td><td>Rápido</td></tr>
+      <tr><td><code>get_pedido</code>, <code>get_contato</code></td><td>15 s</td><td>Leitura simples</td></tr>
+      <tr><td><code>get_pedidos_abertos</code></td><td>30 s</td><td>Até 100 registros</td></tr>
+      <tr><td><code>criar_nf</code>, <code>enviar_nf</code></td><td>60 s</td><td>Validação fiscal + SEFAZ</td></tr>
+    </tbody>
+  </table>
+  <div class="box tip"><span class="tag">Regra</span>
+    <p>Sempre desembrulhe <code>data</code>. A Bling v3 responde <code>{"data": {...}}</code>.
+    Usar <code>.get("data", {})</code> evita <code>KeyError</code> quando a resposta é
+    <code>204 No Content</code>.</p></div>
+
+  <h2 id="erros">5.3 Tradução de erros</h2>
+<pre><code>def _extrair_erro_bling(response) -&gt; str:
+    body = response.json()
+    err = body.get("error", {})
+    code = err.get("type") or err.get("code") or ""
+    msg  = err.get("message") or err.get("description") or ""
+    fields = err.get("fields") or []
+    partes = [f"{f.get('name')}: {f.get('msg')}" for f in fields if isinstance(f, dict)]
+    return " | ".join(x for x in ([code, msg] + partes) if x) or f"HTTP {response.status_code}"</code></pre>
+  <p>Transforma <code>{"error":{"type":"VALIDATION_ERROR","fields":[{"name":"itens","msg":"..."}]}}</code>
+  em texto legível que vai direto para <code>operacoes_nf.erro_descricao</code> e para a tela.
+  Sem essa função o usuário veria apenas “HTTP 400”.</p>
+
+  <h2 id="metodos">5.4 Métodos disponíveis</h2>
+  <table>
+    <thead><tr><th>Grupo</th><th>Métodos</th></tr></thead>
+    <tbody>
+      <tr><td>OAuth</td><td><code>exchange_code_for_token</code>, <code>refresh_access_token</code></td></tr>
+      <tr><td>Pedidos</td><td><code>get_pedidos_abertos</code> (<code>idSituacao=6</code>), <code>get_pedido</code>, <code>atualizar_pedido</code>, <code>atualizar_situacao_pedido</code>, <code>descobrir_ids_situacoes_venda</code></td></tr>
+      <tr><td>Contatos</td><td><code>get_contato</code></td></tr>
+      <tr><td>NF-e</td><td><code>criar_nf</code>, <code>enviar_nf</code>, <code>get_danfe</code>, <code>get_xml</code></td></tr>
+      <tr><td>Produtos</td><td><code>get_categorias</code>, <code>get_produtos</code>, <code>get_produto_detalhe</code>, <code>atualizar_produto</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="danfe">5.5 Estudo de caso: DANFE em três camadas</h2>
+  <p>O download exige entender que o Bling encapsula o PDF em
+  <strong>JSON → Base64URL → GZIP → bytes</strong>:</p>
+<pre><code># 1. Buscar a chaveAcesso (44 dígitos) — o endpoint de documento usa a chave, não o id
+info = await client.get(f"{BLING_BASE_URL}/nfe/{nf_id}", headers=_bearer(token))
+chave_acesso = info.json().get("data", {}).get("chaveAcesso")
+
+# 2. Baixar
+response = await client.get(
+    f"{BLING_BASE_URL}/nfe/documento/{chave_acesso}",
+    params={"formato": "pdf"}, headers=_bearer(token),
+)
+
+# 3. Desembrulhar lista/dict
+conteudo = response.json().get("data")
+if isinstance(conteudo, list) and conteudo:
+    item = conteudo[0]
+    conteudo = (item.get("conteudo") or list(item.values())[0]) \
+               if isinstance(item, dict) else item
+
+# 4. Limpar quebras de linha
+conteudo = conteudo.strip().replace("\n","").replace("\r","").replace(" ","")
+
+# 5. Corrigir padding Base64 (múltiplo de 4)
+resto = len(conteudo) % 4
+if resto:
+    conteudo += "=" * (4 - resto)
+
+# 6. Base64URL (altchars=b'-_') → bytes comprimidos
+dados = base64.b64decode(conteudo, altchars=b'-_')
+
+# 7. GZIP
+try:
+    return gzip.decompress(dados)
+except Exception:
+    return dados     # fallback: não estava comprimido</code></pre>
+  <table>
+    <thead><tr><th>Passo</th><th>Por quê</th></tr></thead>
+    <tbody>
+      <tr><td>Padding</td><td>Base64 exige comprimento múltiplo de 4; o Bling às vezes omite os <code>=</code></td></tr>
+      <tr><td><code>altchars=b'-_'</code></td><td>Variante URL-safe (<code>-</code> e <code>_</code> em vez de <code>+</code> e <code>/</code>)</td></tr>
+      <tr><td>GZIP</td><td>Um DANFE de ~200 KB viaja como ~40 KB</td></tr>
+      <tr><td><code>try/except</code> no gzip</td><td>Contrato não garantido pela Bling</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="debitos">5.6 Débitos técnicos a corrigir</h2>
+
+  <h3>a) Imports mal posicionados</h3>
+  <p><code>import base64</code> e <code>import gzip</code> estão indentados no meio do arquivo,
+  após um <code>return</code> em <code>enviar_nf</code> — código morto que nunca executa.
+  Mova para o topo:</p>
+<pre><code>import base64
+import gzip
+import json
+import os
+import httpx
+from dotenv import load_dotenv</code></pre>
+
+  <h3>b) <code>get_danfe</code> e <code>get_xml</code> são ~95% idênticos</h3>
+<pre><code>async def _baixar_documento(access_token: str, nf_id: str, formato: str) -&gt; bytes:
+    """formato: 'pdf' (DANFE) ou 'xml'. Único ponto de decode Base64+GZIP."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        info = await client.get(f"{BLING_BASE_URL}/nfe/{nf_id}",
+                                headers=_bearer(access_token))
+        if info.is_error:
+            raise ValueError(f"Falha ao buscar dados da NF {nf_id}.")
+
+        chave = info.json().get("data", {}).get("chaveAcesso")
+        if not chave:
+            raise ValueError(f"Chave de acesso ausente para a NF {nf_id} "
+                             "(a NF pode não estar autorizada ainda).")
+
+        resp = await client.get(
+            f"{BLING_BASE_URL}/nfe/documento/{chave}",
+            params={"formato": formato}, headers=_bearer(access_token),
+        )
+
+    if resp.is_error:
+        raise ValueError(f"{formato.upper()} indisponível: {_extrair_erro_bling(resp)}")
+
+    conteudo = resp.json().get("data")
+    if isinstance(conteudo, list) and conteudo:
+        item = conteudo[0]
+        conteudo = (item.get("conteudo") or list(item.values())[0]) \
+                   if isinstance(item, dict) else item
+
+    if not isinstance(conteudo, str):
+        raise ValueError(f"Formato inesperado do Bling: {str(conteudo)[:100]}")
+
+    conteudo = conteudo.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+    if resto := len(conteudo) % 4:
+        conteudo += "=" * (4 - resto)
+
+    dados = base64.b64decode(conteudo, altchars=b"-_")
+    try:
+        return gzip.decompress(dados)
+    except Exception:
+        return dados
+
+
+async def get_danfe(access_token: str, nf_id: str) -&gt; bytes:
+    return await _baixar_documento(access_token, nf_id, "pdf")
+
+async def get_xml(access_token: str, nf_id: str) -&gt; bytes:
+    return await _baixar_documento(access_token, nf_id, "xml")</code></pre>
+
+  <h3>c) <code>print()</code> → <code>logging</code></h3>
+<pre><code>import logging
+logger = logging.getLogger(__name__)
+
+logger.debug("POST /nfe payload:\n%s", json.dumps(payload, indent=2, ensure_ascii=False))
+logger.debug("Resposta %s: %s", response.status_code, response.text[:2000])</code></pre>
+  <div class="box err"><span class="tag">LGPD</span>
+    <p>Os <code>print()</code> de payload expõem <strong>CPF/CNPJ e endereço</strong> em logs de
+    produção. Com <code>logging</code>, basta <code>basicConfig(level=logging.INFO)</code> para
+    silenciá-los — sem editar código.</p></div>
+
+  <h3>d) <code>descobrir_ids_situacoes_venda</code> é diagnóstico</h3>
+  <p>Não tem <code>try/except</code> nem checagem de erro e imprime no stdout.
+  Deve rodar <strong>uma vez</strong>, em script separado — veja o Módulo 6.</p>
+
+  <h2 id="ex">5.7 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 5</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m5e1"><label for="m5e1">Aplicar a refatoração <code>_baixar_documento</code> e testar com uma NF autorizada.</label></li>
+    <li><input type="checkbox" id="m5e2"><label for="m5e2">Mover os imports para o topo e remover o código morto.</label></li>
+    <li><input type="checkbox" id="m5e3"><label for="m5e3">Escrever um teste com <code>httpx.MockTransport</code> para <code>_extrair_erro_bling</code>.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo4.html">← Módulo 4</a><span class="spacer"></span>
+    <a rel="next" href="modulo6.html">Módulo 6 · NF-e em massa →</a></div>
+  <footer>Apostila Bling · Módulo 5 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 8 · Frontend, qualidade e produção</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 8 · Semanas 9–10</p>
+  <h1>Frontend, qualidade e produção</h1>
+  <p class="lead">Templates Jinja2 com herança, CSRF, paginação, emissão em background, testes e checklist de deploy.</p>
+
+  <h2 id="jinja">8.1 Jinja2 e a sintaxe nova do FastAPI</h2>
+<pre><code># ✅ Sintaxe atual (FastAPI ≥ 0.108) — usada no seu código
+return templates.TemplateResponse(
+    request=request,
+    name="pedidos.html",
+    context={"pedidos": pedidos},
+)
+
+# ⚠️ Deprecada
+return templates.TemplateResponse("pedidos.html", {"request": request, ...})</code></pre>
+
+  <h2 id="base">8.2 base.html — herança de template</h2>
+<pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="pt-BR"&gt;
+&lt;head&gt;
+  &lt;meta charset="UTF-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1.0"&gt;
+  &lt;title&gt;{% block titulo %}Plataforma Bling{% endblock %}&lt;/title&gt;
+  &lt;link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;nav&gt;
+    &lt;a href="/dashboard"&gt;Dashboard&lt;/a&gt;
+    &lt;a href="/pedidos/"&gt;Pedidos&lt;/a&gt;
+    &lt;a href="/produtos/"&gt;Produtos&lt;/a&gt;
+    &lt;a href="/nfs/historico"&gt;Histórico&lt;/a&gt;
+    &lt;form action="/auth/logout" method="post" style="display:inline"&gt;
+      &lt;button type="submit"&gt;Sair&lt;/button&gt;
+    &lt;/form&gt;
+  &lt;/nav&gt;
+
+  {% if erro %}&lt;div class="alerta alerta-erro"&gt;{{ erro }}&lt;/div&gt;{% endif %}
+
+  &lt;main&gt;{% block conteudo %}{% endblock %}&lt;/main&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+  <div class="box"><span class="tag">Detalhe importante</span>
+    <p><strong>Logout é <code>POST</code></strong>, não link — operações que mudam estado nunca
+    devem ser <code>GET</code>: o prefetch do navegador deslogaria o usuário.</p></div>
+  <p><code>url_for('static', path=...)</code> gera a URL a partir do
+  <code>app.mount("/static", ...)</code>.</p>
+
+  <h2 id="pedidos">8.3 pedidos.html — o form de emissão</h2>
+<pre><code>{% extends "base.html" %}
+{% block titulo %}Pedidos em aberto{% endblock %}
+
+{% block conteudo %}
+&lt;h1&gt;Pedidos prontos para faturar&lt;/h1&gt;
+
+{% if not pedidos %}
+  &lt;p&gt;Nenhum pedido em aberto.&lt;/p&gt;
+{% else %}
+&lt;form action="/pedidos/emitir" method="post"&gt;
+  &lt;table&gt;
+    &lt;thead&gt;
+      &lt;tr&gt;&lt;th&gt;&lt;/th&gt;&lt;th&gt;Nº&lt;/th&gt;&lt;th&gt;Data&lt;/th&gt;&lt;th&gt;Cliente&lt;/th&gt;&lt;th&gt;Total&lt;/th&gt;&lt;/tr&gt;
+    &lt;/thead&gt;
+    &lt;tbody&gt;
+      {% for p in pedidos %}
+      &lt;tr&gt;
+        &lt;!-- name repetido → FastAPI resolve como List[str] --&gt;
+        &lt;td&gt;&lt;input type="checkbox" name="pedido_ids" value="{{ p.id }}"&gt;&lt;/td&gt;
+        &lt;td&gt;{{ p.numero }}&lt;/td&gt;
+        &lt;td&gt;{{ p.data }}&lt;/td&gt;
+        &lt;td&gt;{{ p.contato.nome if p.contato else '—' }}&lt;/td&gt;
+        &lt;td&gt;R$ {{ '%.2f'|format(p.totalVenda or 0) }}&lt;/td&gt;
+      &lt;/tr&gt;
+      {% endfor %}
+    &lt;/tbody&gt;
+  &lt;/table&gt;
+
+  &lt;label&gt;E-mail para envio dos documentos
+    &lt;input type="email" name="email_destino" required&gt;
+  &lt;/label&gt;
+
+  &lt;label&gt;Data de operação (opcional)
+    &lt;input type="date" name="data_base"&gt;
+  &lt;/label&gt;
+
+  &lt;button type="submit"&gt;Emitir NF-e das selecionadas&lt;/button&gt;
+&lt;/form&gt;
+{% endif %}
+{% endblock %}</code></pre>
+  <div class="box tip"><span class="tag">O detalhe do name repetido</span>
+    <p>O HTML envia <code>pedido_ids=1&amp;pedido_ids=2&amp;pedido_ids=3</code>. O FastAPI, vendo a
+    anotação <code>List[str] = Form(...)</code>, agrupa automaticamente. É por isso que
+    <code>python-multipart</code> está nas dependências.</p>
+    <p><code>data_base</code> vazio chega como <code>""</code> — daí o validator
+    <code>data_base_vazia_vira_none</code> no schema.</p></div>
+
+  <h2 id="relatorio">8.4 relatorio_nf.html — feedback de operação em massa</h2>
+<pre><code>{% extends "base.html" %}
+{% block conteudo %}
+&lt;h1&gt;Relatório de emissão&lt;/h1&gt;
+
+{% if relatorio.aviso_email %}
+  &lt;div class="alerta alerta-aviso"&gt;{{ relatorio.aviso_email }}&lt;/div&gt;
+{% endif %}
+
+&lt;h2&gt;Emitidas ({{ relatorio.sucesso|length }})&lt;/h2&gt;
+&lt;ul&gt;
+  {% for s in relatorio.sucesso %}
+    &lt;li&gt;Pedido {{ s.pedido_id }} → NF {{ s.nf_id }}&lt;/li&gt;
+  {% endfor %}
+&lt;/ul&gt;
+
+&lt;h2&gt;Erros ({{ relatorio.erros|length }})&lt;/h2&gt;
+&lt;ul&gt;
+  {% for e in relatorio.erros %}
+    &lt;li&gt;&lt;strong&gt;Pedido {{ e.pedido_id }}:&lt;/strong&gt; {{ e.motivo }}&lt;/li&gt;
+  {% endfor %}
+&lt;/ul&gt;
+
+&lt;p&gt;Documentos enviados para &lt;strong&gt;{{ email_destino }}&lt;/strong&gt;.&lt;/p&gt;
+{% endblock %}</code></pre>
+
+  <h2 id="dashboard">8.5 dashboard.html — badge de integração</h2>
+<pre><code>{% extends "base.html" %}
+{% block conteudo %}
+{% if token_status.ativo %}
+  &lt;span class="badge badge-ok"&gt;Integração Ativa&lt;/span&gt;
+  &lt;small&gt;Expira às {{ token_status.expires_at.strftime('%H:%M') }}&lt;/small&gt;
+  &lt;form action="/auth/bling/desconectar" method="post"&gt;
+    &lt;button&gt;Desligar integração&lt;/button&gt;
+  &lt;/form&gt;
+{% else %}
+  &lt;span class="badge badge-off"&gt;Desconectada&lt;/span&gt;
+  &lt;a class="btn" href="/auth/bling/conectar"&gt;Conectar ao Bling&lt;/a&gt;
+{% endif %}
+
+&lt;div class="cards"&gt;
+  &lt;div class="card"&gt;&lt;h3&gt;{{ total_nfs_emitidas }}&lt;/h3&gt;&lt;p&gt;NF-e emitidas&lt;/p&gt;&lt;/div&gt;
+  &lt;div class="card"&gt;&lt;h3&gt;{{ total_atualizacoes }}&lt;/h3&gt;&lt;p&gt;Preços atualizados&lt;/p&gt;&lt;/div&gt;
+&lt;/div&gt;
+{% endblock %}</code></pre>
+  <p>Os contadores vêm de <code>SELECT COUNT()</code> no banco local — <strong>nunca</strong> da API
+  Bling. O dashboard carrega instantaneamente mesmo com a integração fora do ar.</p>
+
+  <h2 id="xss">8.6 Segurança: XSS e o autoescape do Jinja2</h2>
+  <p>Jinja2 escapa HTML por padrão em arquivos <code>.html</code>. Se um cliente se chamar
+  <code>&lt;script&gt;alert(1)&lt;/script&gt;</code>, será renderizado como texto.</p>
+  <div class="box err"><span class="tag">Nunca faça</span>
+    <p>Não use <code>|safe</code> em dados vindos do Bling ou do usuário. Isso desliga o escape e abre XSS.</p></div>
+
+  <h2 id="csrf">8.7 Proteção CSRF (lacuna atual)</h2>
+  <p>Seus forms <code>POST</code> não têm token CSRF. Com <code>samesite="lax"</code> o risco é
+  reduzido, mas a proteção completa exige:</p>
+<pre><code># Gerar no GET
+csrf = secrets.token_hex(16)
+response.set_cookie("csrf_token", csrf, httponly=True, samesite="lax")
+
+# Validar no POST
+def validar_csrf(request: Request, csrf_token: str = Form(...)):
+    if request.cookies.get("csrf_token") != csrf_token:
+        raise HTTPException(403, "Token CSRF inválido")</code></pre>
+<pre><code>&lt;input type="hidden" name="csrf_token" value="{{ csrf_token }}"&gt;</code></pre>
+
+  <h2 id="paginacao">8.8 Paginação (resolvendo o limite de 100)</h2>
+<pre><code>async def get_todos_produtos(access_token: str, categoria_id: str) -&gt; list[dict]:
+    """Percorre todas as páginas até a Bling retornar lista vazia."""
+    todos, pagina = [], 1
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        while True:
+            resp = await client.get(
+                f"{BLING_BASE_URL}/produtos",
+                headers=_bearer(access_token),
+                params={"idCategoria": categoria_id, "pagina": pagina, "limite": 100},
+            )
+            if resp.is_error:
+                raise ValueError(f"Erro ao listar produtos: {_extrair_erro_bling(resp)}")
+
+            dados = resp.json().get("data", [])
+            if not dados:
+                break
+            todos.extend(dados)
+            pagina += 1
+            await asyncio.sleep(0.4)      # rate limit
+            if pagina &gt; 50:               # guarda contra loop infinito
+                break
+    return todos</code></pre>
+
+  <h2 id="background">8.9 Emissão em background (resolvendo o timeout de 3 min)</h2>
+  <p>Hoje 20 pedidos ≈ 3 minutos de requisição HTTP → risco de <code>504</code> em proxies.</p>
+<pre><code>from fastapi import BackgroundTasks
+from db.database import AsyncSessionLocal
+
+@router.post("/emitir")
+async def emitir_nfs(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    pedido_ids: List[str] = Form(...),
+    email_destino: str = Form(...),
+    data_base: str = Form(None),
+):
+    usuario_id = get_usuario_id(request)
+    if not usuario_id:
+        return RedirectResponse("/auth/login")
+
+    async def processar():
+        # Sessão própria: a de Depends(get_db) já foi fechada
+        async with AsyncSessionLocal() as db:
+            await nf_service.emitir_nfs_massa(
+                db=db, usuario_id=usuario_id, pedido_ids=pedido_ids,
+                data_base=data_base, email_destino=email_destino,
+            )
+
+    background_tasks.add_task(processar)
+    return RedirectResponse("/nfs/historico?processando=1", status_code=303)</code></pre>
+  <p>O usuário acompanha o resultado em <code>/nfs/historico</code>, que já lê de
+  <code>operacoes_nf</code>. Para produção com múltiplos workers, evolua para
+  <strong>Celery</strong> ou <strong>ARQ</strong> com Redis.</p>
+
+  <h2 id="testes">8.10 Testes</h2>
+<pre><code># tests/test_nf_service.py
+import pytest
+from services.nf_service import _validar_pedido_basico, _montar_payload_nf
+
+def test_pedido_sem_cpf():
+    assert "sem CPF/CNPJ" in _validar_pedido_basico({"contato": {"nome": "X"}})
+
+def test_pedido_sem_itens():
+    pedido = {"contato": {"nome": "X", "numeroDocumento": "12345678901"}, "itens": []}
+    assert "sem itens" in _validar_pedido_basico(pedido)
+
+def test_pedido_valido():
+    pedido = {
+        "contato": {"nome": "X", "numeroDocumento": "123.456.789-01"},
+        "itens": [{"descricao": "P", "valor": 10.0, "quantidade": 1}],
+    }
+    assert _validar_pedido_basico(pedido) is None
+
+def test_payload_cria_parcela_quando_pedido_nao_tem():
+    pedido = {
+        "contato": {"nome": "X", "numeroDocumento": "12345678901"},
+        "itens": [{"codigo": "A", "descricao": "P", "valor": 100.0, "quantidade": 1}],
+        "parcelas": [], "total": 100.0,
+    }
+    payload = _montar_payload_nf(pedido, {}, "2026-08-11", "999")
+    assert len(payload["parcelas"]) == 1
+    assert payload["parcelas"][0]["valor"] == 100.0
+    assert "Pedido Original: 999" in payload["observacoes"]</code></pre>
+  <p>Funções puras (<code>_validar_pedido_basico</code>, <code>_montar_payload_nf</code>,
+  <code>_aplicar_percentual_com_variacoes</code>) são triviais de testar — a arquitetura em camadas
+  torna isso possível.</p>
+<pre><code>pip install pytest pytest-asyncio
+pytest -v</code></pre>
+
+  <h2 id="checklist">8.11 Checklist de produção</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 8 · exercícios</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+
+  <h3>Segurança</h3>
+  <ul class="check">
+    <li><input type="checkbox" id="p1"><label for="p1"><code>secure=True</code> em todos os cookies (HTTPS obrigatório)</label></li>
+    <li><input type="checkbox" id="p2"><label for="p2"><code>JWT_SECRET_KEY</code> forte e fora do repositório</label></li>
+    <li><input type="checkbox" id="p3"><label for="p3"><code>.env</code> no <code>.gitignore</code></label></li>
+    <li><input type="checkbox" id="p4"><label for="p4">CSRF nos forms POST (8.7)</label></li>
+    <li><input type="checkbox" id="p5"><label for="p5">Rate limit no login (contra força bruta)</label></li>
+    <li><input type="checkbox" id="p6"><label for="p6"><code>allow_origins</code> restrito se habilitar CORS</label></li>
+    <li><input type="checkbox" id="p7"><label for="p7"><code>print()</code> de payload removidos (contêm CPF/CNPJ → LGPD)</label></li>
+  </ul>
+
+  <h3>Banco</h3>
+  <ul class="check">
+    <li><input type="checkbox" id="p8"><label for="p8">Alembic no lugar de <code>create_all</code></label></li>
+    <li><input type="checkbox" id="p9"><label for="p9">Índices de <code>usuario_id</code> criados</label></li>
+    <li><input type="checkbox" id="p10"><label for="p10"><code>engine.dispose()</code> no shutdown</label></li>
+    <li><input type="checkbox" id="p11"><label for="p11">Backup automatizado (<code>pg_dump</code>)</label></li>
+    <li><input type="checkbox" id="p12"><label for="p12">Timezone consistente (naive <em>ou</em> aware, nunca misturado)</label></li>
+  </ul>
+
+  <h3>Robustez</h3>
+  <ul class="check">
+    <li><input type="checkbox" id="p13"><label for="p13">Paginação em produtos e pedidos</label></li>
+    <li><input type="checkbox" id="p14"><label for="p14">Emissão em background</label></li>
+    <li><input type="checkbox" id="p15"><label for="p15"><code>logging</code> no lugar de <code>print</code></label></li>
+    <li><input type="checkbox" id="p16"><label for="p16"><code>descobrir_ids_situacoes_venda</code> fora do fluxo de produção</label></li>
+    <li><input type="checkbox" id="p17"><label for="p17">Retry com <em>backoff</em> para <code>429 Too Many Requests</code></label></li>
+  </ul>
+
+  <h3>Deploy</h3>
+<pre><code>uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4</code></pre>
+  <ul class="check">
+    <li><input type="checkbox" id="p18"><label for="p18">Nginx como proxy reverso + TLS (Let's Encrypt)</label></li>
+    <li><input type="checkbox" id="p19"><label for="p19"><code>proxy_read_timeout</code> alto se não usar background task</label></li>
+    <li><input type="checkbox" id="p20"><label for="p20"><code>BLING_REDIRECT_URI</code> apontando para o domínio real</label></li>
+    <li><input type="checkbox" id="p21"><label for="p21">Systemd/Docker para restart automático</label></li>
+  </ul>
+
+  <h2 id="ex">8.12 Exercícios finais</h2>
+  <ul class="check">
+    <li><input type="checkbox" id="m8e1"><label for="m8e1">Implementar todos os templates com herança de <code>base.html</code>.</label></li>
+    <li><input type="checkbox" id="m8e2"><label for="m8e2">Adicionar proteção CSRF em <code>/auth/login</code> e <code>/pedidos/emitir</code>.</label></li>
+    <li><input type="checkbox" id="m8e3"><label for="m8e3">Migrar a emissão para <code>BackgroundTasks</code> e ajustar <code>historico_nf.html</code>.</label></li>
+    <li><input type="checkbox" id="m8e4"><label for="m8e4">Implementar paginação em <code>get_produtos</code>.</label></li>
+    <li><input type="checkbox" id="m8e5"><label for="m8e5">Escrever 10 testes cobrindo <code>nf_service</code> e <code>produtos</code>.</label></li>
+    <li><input type="checkbox" id="m8e6"><label for="m8e6">Configurar Alembic e gerar a primeira migração.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="modulo7.html">← Módulo 7</a><span class="spacer"></span>
+    <a rel="next" href="index.html">Voltar ao índice →</a></div>
+  <footer>Apostila Bling · Módulo 8 de 8 · Fim</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Módulo 1 · Fundamentos e ambiente</title>
+<link rel="stylesheet" href="file.css">
+</head>
+<body>
+<div id="progress"></div>
+<header class="topbar">
+  <a class="brand" href="index.html">📘 Apostila Bling</a>
+  <nav><a href="index.html">Índice</a>
+    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
+    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
+    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
+  <button class="icon-btn" id="theme-btn">☀️</button>
+</header>
+
+<div class="wrap">
+<main>
+  <p class="eyebrow">Módulo 1 · Semana 1</p>
+  <h1>Fundamentos e ambiente</h1>
+  <p class="lead">Entender ASGI e <code>async/await</code>, montar o ambiente virtual e configurar variáveis de ambiente.</p>
+
+  <h2 id="async">1.1 Por que <code>async</code>?</h2>
+  <p>O projeto faz muito <strong>I/O bloqueante</strong> (banco + API Bling). Com <code>async</code>, enquanto
+  uma requisição espera o Bling responder (até 60 s em <code>criar_nf</code>), o servidor atende outras.</p>
+<pre><code># ERRADO — bloqueia o event loop inteiro
+import time, requests
+def emitir():
+    time.sleep(5)
+    requests.post(...)
+
+# CERTO — libera o loop (padrão do seu projeto)
+import asyncio, httpx
+async def emitir():
+    await asyncio.sleep(5)
+    async with httpx.AsyncClient() as c:
+        await c.post(...)</code></pre>
+  <div class="box err"><span class="tag">Atenção</span>
+    <p><strong>Nunca</strong> use <code>requests</code>, <code>time.sleep</code> ou driver síncrono
+    (<code>psycopg2</code>) dentro de uma rota <code>async def</code>. Um único bloqueio congela
+    todas as requisições do worker.</p></div>
+
+  <h2 id="setup">1.2 Setup</h2>
+<pre><code>python -m venv venv
+source venv/bin/activate      # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload</code></pre>
+
+  <h2 id="deps">1.3 requirements.txt (PostgreSQL)</h2>
+<pre><code>fastapi
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg                 # ← substitui aiomysql
+python-jose[cryptography]
+bcrypt
+httpx
+python-dotenv
+jinja2
+python-multipart
+aiofiles
+pydantic[email]
+alembic                 # ← recomendado (Módulo 2.5)</code></pre>
+
+  <h2 id="env">1.4 O arquivo .env</h2>
+  <div class="box warn"><span class="tag">LGPD / Segurança</span>
+    <p><code>.env</code> <strong>nunca</strong> vai para o Git. Adicione ao <code>.gitignore</code> antes do primeiro commit.</p></div>
+<pre><code>DATABASE_URL=postgresql+asyncpg://usuario:senha@localhost:5432/bling_db
+
+JWT_SECRET_KEY=troque_por_secrets.token_hex(32)
+JWT_ALGORITHM=HS256
+JWT_EXPIRE_MINUTES=480
+
+BLING_CLIENT_ID=seu_client_id
+BLING_CLIENT_SECRET=seu_client_secret
+BLING_REDIRECT_URI=http://localhost:8000/auth/bling/callback
+
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=seu@email.com
+SMTP_PASSWORD=senha_de_app</code></pre>
+  <p>Gerar a chave:</p>
+<pre><code>import secrets; print(secrets.token_hex(32))</code></pre>
+
+  <h3>Carregamento robusto do <code>.env</code></h3>
+  <p>Seu <code>auth.py</code> resolve o caminho de forma absoluta — funciona independentemente
+  de onde o <code>uvicorn</code> foi iniciado:</p>
+<pre><code>base_dir = Path(__file__).resolve().parent.parent
+if (base_dir / ".env").exists():
+    load_dotenv(base_dir / ".env")
+else:
+    load_dotenv(base_dir.parent / ".env")</code></pre>
+
+  <h2 id="estrutura">1.5 Estrutura de pastas</h2>
+  <div class="diagram">projeto/
+├── main.py                 # app, lifespan, mount static, include_router
+├── dependencies.py         # get_usuario_id (lê o JWT do cookie)
+├── .env
+├── db/
+│   ├── database.py         # engine + AsyncSessionLocal + get_db
+│   └── models.py           # Usuario, BlingToken, OperacaoNF, AtualizacaoPreco
+├── schemas/schemas.py      # validação Pydantic
+├── routers/
+│   ├── auth.py             # login, cadastro, OAuth Bling
+│   ├── pedidos.py          # listar + POST /emitir
+│   ├── produtos.py         # listar + POST /atualizar
+│   └── nfs.py              # GET /historico
+├── services/
+│   ├── bling_client.py     # ÚNICO que faz httpx
+│   ├── token_service.py    # save / get_valid / deactivate
+│   ├── nf_service.py       # emitir_nfs_massa
+│   └── email_service.py
+├── templates/
+└── static/css/style.css</div>
+
+  <h2 id="ex">1.6 Exercícios</h2>
+  <div class="progress-box" id="mod-progress"><strong>Módulo 1</strong>
+    <div class="txt"></div><div class="bar"><span></span></div></div>
+  <ul class="check">
+    <li><input type="checkbox" id="m1e1"><label for="m1e1">Criar o venv, instalar as deps e acessar <code>http://localhost:8000/docs</code>.</label></li>
+    <li><input type="checkbox" id="m1e2"><label for="m1e2">Explicar por que <code>main.py</code> redireciona <code>/</code> para <code>/auth/login</code>.</label></li>
+    <li><input type="checkbox" id="m1e3"><label for="m1e3">Rodar <code>python -c "import asyncpg"</code> e confirmar que não há erro.</label></li>
+  </ul>
+
+  <div class="pager">
+    <a rel="prev" href="index.html">← Índice</a><span class="spacer"></span>
+    <a rel="next" href="modulo2.html">Módulo 2 · Banco de dados →</a></div>
+  <footer>Apostila Bling · Módulo 1 de 8</footer>
+</main>
+<aside class="toc"><h4>Neste módulo</h4></aside>
+</div>
+<script src="assets/script.js"></script>
+</body>
+</html>
