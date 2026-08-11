@@ -52,7 +52,7 @@
     box.querySelector('.bar span').style.width = pct + '%';
   }
 
-  /* Progresso global (INDEX.html) — usa data-checks="id1,id2,..." nos cards */
+  /* Progresso global (index.html) — usa data-checks="id1,id2,..." nos cards */
   function renderIndexProgress() {
     const state = loadChecks();
     let total = 0, done = 0;
@@ -145,7 +145,7 @@
 
   /* ---------- Link ativo na topbar ---------- */
   function initActiveNav() {
-    const file = location.pathname.split('/').pop() || 'INDEX.html';
+    const file = location.pathname.split('/').pop() || 'index.html';
     document.querySelectorAll('.topbar nav a').forEach((a) => {
       if (a.getAttribute('href') === file) a.classList.add('active');
     });

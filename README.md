@@ -9,7 +9,7 @@ Pequeno site estático com material da apostila.
 - `assets/script.js` — scripts
 
 ## Como abrir localmente
-1. Abra `INDEX.html` diretamente no navegador (duplo-clique), ou
+1. Abra `index.html` diretamente no navegador (duplo-clique), ou
 2. Sirva via um servidor HTTP local (recomendado):
 
 ```powershell
