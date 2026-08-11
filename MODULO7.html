@@ -11,11 +11,11 @@
 <body>
 <div id="progress"></div>
 <header class="topbar">
-  <a class="brand" href="index.html">📘 Apostila Bling</a>
-  <nav><a href="index.html">Índice</a>
-    <a href="modulo1.html">1</a><a href="modulo2.html">2</a><a href="modulo3.html">3</a>
-    <a href="modulo4.html">4</a><a href="modulo5.html">5</a><a href="modulo6.html">6</a>
-    <a href="modulo7.html">7</a><a href="modulo8.html">8</a></nav>
+  <a class="brand" href="INDEX.html">📘 Apostila Bling</a>
+  <nav><a href="INDEX.html">Índice</a>
+    <a href="MODULO1.html">1</a><a href="MODULO2.html">2</a><a href="MODULO3.html">3</a>
+    <a href="MODULO4.html">4</a><a href="MODULO5.html">5</a><a href="MODULO6.html">6</a>
+    <a href="MODULO7.html">7</a><a href="MODULO8.html">8</a></nav>
   <button class="icon-btn" id="reset-btn" title="Zerar progresso">↺</button>
   <button class="icon-btn" id="theme-btn">☀️</button>
 </header>
@@ -147,7 +147,7 @@ async def listar_produtos(request, categoria_id: str = None, db=Depends(get_db))
   <ul>
     <li><strong>Sem paginação:</strong> <code>limite=100</code> em <code>get_produtos</code>.
     Categorias com mais de 100 itens são silenciosamente truncadas →
-    <a href="modulo8.html#paginacao">solução no M8</a>.</li>
+    <a href="MODULO8.html#paginacao">solução no M8</a>.</li>
     <li><strong>Sem rate limit no loop:</strong> ao contrário do <code>nf_service</code>, não há
     <code>asyncio.sleep</code>. Com 100 produtos você pode estourar o limite do Bling.
     Adicione <code>await asyncio.sleep(0.5)</code>.</li>
@@ -167,8 +167,8 @@ async def listar_produtos(request, categoria_id: str = None, db=Depends(get_db))
   </ul>
 
   <div class="pager">
-    <a rel="prev" href="modulo6.html">← Módulo 6</a><span class="spacer"></span>
-    <a rel="next" href="modulo8.html">Módulo 8 · Frontend e produção →</a></div>
+    <a rel="prev" href="MODULO6.html">← Módulo 6</a><span class="spacer"></span>
+    <a rel="next" href="MODULO8.html">Módulo 8 · Frontend e produção →</a></div>
   <footer>Apostila Bling · Módulo 7 de 8</footer>
 </main>
 <aside class="toc"><h4>Neste módulo</h4></aside>
